@@ -17,10 +17,6 @@ from __future__ import annotations
 import argparse
 import sys
 from contextlib import contextmanager
-from typing import TYPE_CHECKING
-
-
-
 
 from lib.seriallink import SerialLink
 from lib.simlink import SimLink
@@ -28,7 +24,6 @@ from lib.simlink import SimLink
 DEFAULT_BAUD = 115200
 DEFAULT_CFU = "top.v"
 DEFAULT_FIRMWARE = "firmware/zig-out/bin/firmware.bin"
-INPUT_OFFSET = 128
 
 
 def create_link(
@@ -59,69 +54,6 @@ def open_link(**kwargs):
         yield link
     finally:
         link.close()
-
-
-def _pack_u8x4(chunk) -> int:
-    packed = 0
-    for lane, value in enumerate(chunk):
-        packed |= (int(value) & 0xFF) << (8 * lane)
-    return packed
-
-
-def _as_u8_vector(values) -> "np.ndarray":
-    import numpy as np
-
-    array = np.asarray(values)
-    if not np.issubdtype(array.dtype, np.integer):
-        raise TypeError("mac4_numpy expects integer array-like inputs")
-    flat = array.reshape(-1)
-    if flat.size == 0:
-        return np.zeros(0, dtype=np.uint8)
-    if np.any(flat < 0) or np.any(flat > 0xFF):
-        raise ValueError("mac4_numpy expects values in the range [0, 255]")
-    return flat.astype(np.uint8, copy=False)
-
-
-def iter_mac4_chunks(lhs, rhs):
-    import numpy as np
-
-    lhs_array = _as_u8_vector(lhs)
-    rhs_array = _as_u8_vector(rhs)
-    if lhs_array.shape != rhs_array.shape:
-        raise ValueError(
-            f"mac4_numpy expects matching shapes, got {lhs_array.shape} and {rhs_array.shape}"
-        )
-
-    if lhs_array.size == 0:
-        return
-
-    pad = (-lhs_array.size) % 4
-    if pad:
-        lhs_array = np.pad(lhs_array, (0, pad), constant_values=0)
-        rhs_array = np.pad(rhs_array, (0, pad), constant_values=0)
-
-    for offset in range(0, lhs_array.size, 4):
-        yield (
-            _pack_u8x4(lhs_array[offset : offset + 4]),
-            _pack_u8x4(rhs_array[offset : offset + 4]),
-        )
-
-
-def mac4_numpy(link, lhs, rhs) -> int:
-    total = 0
-    for packed_lhs, packed_rhs in iter_mac4_chunks(lhs, rhs):
-        total += link.mac4(packed_lhs, packed_rhs)
-    return total
-
-
-def mac4_numpy_reference(lhs, rhs, input_offset: int = INPUT_OFFSET) -> int:
-    lhs_array = _as_u8_vector(lhs).astype("int32", copy=False)
-    rhs_array = _as_u8_vector(rhs).astype("int32", copy=False)
-    if lhs_array.shape != rhs_array.shape:
-        raise ValueError(
-            f"mac4_numpy_reference expects matching shapes, got {lhs_array.shape} and {rhs_array.shape}"
-        )
-    return int(((lhs_array + input_offset) * rhs_array).sum(dtype="int64"))
 
 
 def run_tests(link):

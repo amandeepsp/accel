@@ -65,27 +65,31 @@ class SerialLink:
             if self.verbose and ch == b"\n":
                 lines = buf.decode("utf-8", errors="replace").rstrip().rsplit("\n", 1)
                 print(f"[bios] {lines[-1]}")
-            if not self.no_upload:
-                if not prompted and buf.endswith(sfl_prompt_req):
-                    if self.verbose:
-                        print("[host] got SFL prompt, sending ACK...")
-                    self.ser.write(sfl_prompt_ack)
-                    prompted = True
-                if buf.endswith(sfl_magic_req):
-                    if self.verbose:
-                        print("[host] got SFL magic, sending ACK...")
-                    self.ser.write(sfl_magic_ack)
-                    self.ser.flush()
-                    time.sleep(0.5)
-                    self.ser.reset_input_buffer()
-                    self._sfl_upload()
-                    break
+            if not prompted and buf.endswith(sfl_prompt_req):
+                if self.verbose:
+                    print("[host] got SFL prompt, sending ACK...")
+                self.ser.write(sfl_prompt_ack)
+                prompted = True
+            if buf.endswith(sfl_magic_req):
+                if self.verbose:
+                    print("[host] got SFL magic, sending ACK...")
+                self.ser.write(sfl_magic_ack)
+                self.ser.flush()
+                # Drain BIOS output (including ready 'K') until 200ms of silence.
+                self.ser.timeout = 0.2
+                while self.ser.read(256):
+                    pass
+                self.ser.timeout = 1
+                self._sfl_upload()
+                break
         else:
             text = buf.decode("utf-8", errors="replace")
             raise TimeoutError(
                 f"Timed out waiting for SFL magic. Got:\n{text[-500:]}"
             )
 
+        # Wait for firmware "[link] ready" marker (drains BIOS post-jump text).
+        self._wait_for_firmware_ready(deadline)
         self.ser.reset_input_buffer()
         self._wait_for_ping(deadline)
         print("[host] ready (serial)")
@@ -116,10 +120,13 @@ class SerialLink:
             )
             self.ser.write(frame)
 
+            # Read first byte; if it's not a valid ACK, drain and print all bytes to help diagnose.
             reply = self.ser.read(1)
             if reply != sfl_ack_success:
+                time.sleep(0.2)
+                extra = self.ser.read(self.ser.in_waiting or 1)
                 raise RuntimeError(
-                    f"SFL upload failed at offset {offset}: reply={reply!r}"
+                    f"SFL upload failed at offset {offset}: reply={reply!r} extra={extra!r}"
                 )
 
             address += len(chunk)
@@ -179,6 +186,25 @@ class SerialLink:
         if resp["status"] != 0:
             raise RuntimeError(f"Firmware error: status=0x{resp['status']:02x}")
         return resp
+
+    def _wait_for_firmware_ready(self, deadline: float):
+        """Read serial until we see the firmware '[link] ready' marker."""
+        marker = b"[link] ready\n"
+        buf = b""
+        while time.time() < deadline:
+            ch = self.ser.read(1)
+            if not ch:
+                continue
+            buf += ch
+            if self.verbose and ch == b"\n":
+                line = buf.decode("utf-8", errors="replace").rstrip().rsplit("\n", 1)[-1]
+                print(f"[fw] {line}")
+            if buf.endswith(marker):
+                return
+        raise TimeoutError(
+            f"Timed out waiting for firmware ready marker. Got:\n"
+            f"{buf[-500:].decode('utf-8', errors='replace')}"
+        )
 
     def _wait_for_ping(self, deadline: float):
         last_error = None
