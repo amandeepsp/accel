@@ -424,6 +424,16 @@ Run the matmul benchmark from Unit 4 on your 4x4 systolic array. Compare against
 **Previous:** [Unit 6 -- End-to-End: Run a Real Model](06-model.md)
 **Reference:** [Prior Art & Architecture Decisions](appendix-prior-art.md)
 
+## Side Quests
+
+- **Output-stationary dataflow.** Implement output-stationary (accumulator stays in PE, both weights and activations flow) and compare against weight-stationary. Output-stationary eliminates K-dimension tiling — the `first`/`last` pattern from the appendix. Measure: control complexity, BSRAM usage, and utilization.
+- **Sparse acceleration.** If a weight is zero, skip the multiply. Add a zero-detection circuit that advances the filter store address without consuming a compute cycle. Pruned MobileNet models have 30–70% zero weights — this can nearly double effective throughput. Read [Han et al., "Deep Compression"](https://arxiv.org/abs/1510.00149) for context.
+- **Roofline analysis.** Build a roofline model for your specific hardware: 27 MHz, 16 MACs/cycle peak, 108 MB/s BSRAM bandwidth. Plot where each MobileNet layer falls. Identify which layers are compute-bound vs. memory-bound. The roofline tells you exactly when scaling the array helps vs. when you need more bandwidth.
+- **Clock pushing.** Use the PLL to push clock speed: 27 -> 54 -> 81 -> 108 MHz. Add pipeline registers to the PE critical path if timing fails. Document the frequency ceiling and what limits it (array? VexRiscv? routing?). This is the cheapest 2–4x speedup available.
+- **2x2 first.** Build a 2x2 array, get it fully passing all tests, then scale to 4x4. The 2x2 array catches every timing and control bug with 4x fewer signals to debug. The jump from 2x2 to 4x4 should be parameterized — change one constant, resynthesize.
+
+---
+
 ## Suggested Readings
 
 | Topic | Source |
@@ -432,7 +442,10 @@ Run the matmul benchmark from Unit 4 on your 4x4 systolic array. Compare against
 | Eyeriss (dataflow taxonomy) | [eyeriss.mit.edu](https://eyeriss.mit.edu/) -- Sze et al., row-stationary dataflow and energy analysis |
 | Eyeriss v2 (flexible dataflow) | [arxiv.org/abs/1807.07928](https://arxiv.org/abs/1807.07928) -- Chen et al., hierarchical mesh for sparse acceleration |
 | NVIDIA Tensor Core architecture | [arxiv.org/abs/1811.01143](https://arxiv.org/abs/1811.01143) -- Markidis et al., "NVIDIA Tensor Core Programmability, Performance & Precision" |
-| Systolic array tutorial | [cmu.edu/~adamMDPI/systolic](https://www.cs.utexas.edu/~pingali/CS378/2008sp/papers/Kung.pdf) -- H.T. Kung, "Why Systolic Architectures?" (the original 1982 paper) |
+| Systolic array tutorial | [cs.utexas.edu/~pingali/](https://www.cs.utexas.edu/~pingali/CS378/2008sp/papers/Kung.pdf) -- H.T. Kung, "Why Systolic Architectures?" (the original 1982 paper) |
 | CFU-Playground hps_accel | [github.com/google/CFU-Playground](https://github.com/google/CFU-Playground) -- `proj/hps_accel/gateware/gen2/` for the 4x2 systolic implementation |
 | Gowin pDSP user guide | UG289E -- MULT9X9, MULT18X18, MULTALU primitive configurations |
 | Data reuse and tiling | [arxiv.org/abs/1602.04183](https://arxiv.org/abs/1602.04183) -- Chen et al., "Eyeriss: An Energy-Efficient Reconfigurable Accelerator" (Section IV on dataflow) |
+| Sparse accelerators | [arxiv.org/abs/1510.00149](https://arxiv.org/abs/1510.00149) -- Han et al., "Deep Compression: Compressing DNNs with Pruning, Trained Quantization and Huffman Coding." Foundational work on model sparsity |
+| Roofline model | [doi.org/10.1145/1498765.1498785](https://doi.org/10.1145/1498765.1498785) -- Williams, Waterman, Patterson, "Roofline: An Insightful Visual Performance Model" (2009). The framework for understanding whether you're compute-bound or memory-bound |
+| FPGA systolic array case study | [arxiv.org/abs/1807.06434](https://arxiv.org/abs/1807.06434) -- Abdelfattah et al., "DLA: Compiler and FPGA Overlay for Neural Network Inference Acceleration" (2018). A systolic array on Intel FPGAs — compare their design choices to yours |

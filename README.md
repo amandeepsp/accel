@@ -5,8 +5,8 @@ Hardware ML accelerator built around a VexRiscv soft-core with a Custom Function
 The current stack is:
 - host Python sends requests over UART
 - bare-metal Zig firmware decodes them
-- the firmware issues a `CUSTOM_0` instruction
-- CFU hardware executes a 4-lane SIMD MAC (`mac4`)
+- the firmware issues `CUSTOM_0` instructions
+- CFU hardware executes: 4-lane SIMD MAC (`mac4`), requantization (`srdhm`, `rdbpot`)
 
 ```
 Host PC ──UART──► VexRiscv firmware ──CUSTOM_0 insn──► CFU hardware
@@ -101,6 +101,6 @@ zig build run -- /dev/ttyUSB1
 
 ## Docs
 
-- `docs/cfu.md`
-- `docs/firmware.md`
-- `docs/tutorial/`
+- `docs/cfu.md` — CFU hardware reference
+- `docs/firmware.md` — firmware reference
+- `docs/course/` — 8-unit course on ML accelerator design

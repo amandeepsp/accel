@@ -408,7 +408,7 @@ You need 3 inputs (accumulator, multiplier, shift) but the CFU only provides 2 i
 
 Look at how Google's `hps_accel` solves this: the PostProcess pipeline reads per-channel parameters (bias, multiplier, shift) from a dedicated BSRAM. The parameters are loaded once at layer setup time. The pipeline is fully autonomous — no per-element CPU involvement.
 
-Reference: `docs/tutorial/appendix-prior-art.md`, Section A.3 (The Requantisation Pipeline).
+Reference: `docs/course/appendix-prior-art.md`, Section A.3 (The Requantisation Pipeline).
 
 </details>
 
@@ -440,6 +440,15 @@ If the final INT8 value matches your Python reference, your fusion pipeline is c
 
 ---
 
+## Side Quests
+
+- **LUT-based activation functions.** Instead of clamping to [-128, 127] for ReLU, use a 256-entry BSRAM lookup table indexed by the INT8 output. This lets you implement *any* activation function (sigmoid, GELU, swish) at zero extra logic cost — just change the table contents. One BSRAM block, 256 bytes.
+- **Bitwise SRDHM.** Implement SRDHM using only shifts and adds (no DSP multiplier). Booth's algorithm gives you a 32x32 multiply in ~16 cycles using a shift register. It's 16x slower than the DSP version but uses zero DSPs — useful if you're DSP-constrained on a smaller FPGA.
+- **Batch normalization fusion.** BN after conv is `y = gamma * (x - mean) / sqrt(var + eps) + beta`. At inference time, these are constants. Pre-compute them as a single multiply + shift + add that folds into the existing requantization pipeline. One more fused op, zero extra CPU cycles.
+- **Bit-exact TFLite comparison.** Run TFLite's reference interpreter on the same input and compare your SRDHM/RDBPOT output bit-for-bit. The [gemmlowp source](https://github.com/google/gemmlowp/blob/master/fixedpoint/fixedpoint.h) has the canonical implementation. Off-by-one in the rounding nudge is the most common divergence.
+
+---
+
 ## Suggested Readings
 
 1. **Operator Fusion in ML Compilers:**
@@ -453,11 +462,14 @@ If the final INT8 value matches your Python reference, your fusion pipeline is c
 
 3. **Hardware Fusion in Accelerators:**
    - "In-Datacenter Performance Analysis of a Tensor Processing Unit" (Jouppi et al., 2017) — the TPU v1 paper. Section 4 describes how the activation pipeline (requantisation + nonlinearity) is fused with the systolic array output.
-   - CFU-Playground `hps_accel` source code, `PostProcess` module — a concrete implementation of fused requantisation in Amaranth, directly applicable to your design. See `docs/tutorial/appendix-prior-art.md` Section A.3 for analysis.
+   - CFU-Playground `hps_accel` source code, `PostProcess` module — a concrete implementation of fused requantisation in Amaranth, directly applicable to your design. See `docs/course/appendix-prior-art.md` Section A.3 for analysis.
 
 4. **Memory Bandwidth as the Bottleneck:**
    - "Roofline: An Insightful Visual Performance Model" (Williams, Waterman, Patterson, 2009) — explains why low-arithmetic-intensity ops (like requantisation) are always memory-bound, and why fusion is the only way to improve them.
    - "Making Deep Learning Go Brrrr From First Principles" (Horace He, 2022) — accessible blog post explaining memory bandwidth bottlenecks in PyTorch, with concrete examples of why fusion matters.
+
+5. **Foundational:**
+   - Ragan-Kelley et al., ["Halide: A Language and Compiler for Optimizing Parallelism, Locality, and Recomputation"](https://people.csail.mit.edu/jrk/halide-pldi13.pdf) (PLDI 2013) — the Halide scheduling language separates *what* to compute from *how*. Its fusion decisions (inline vs. store-at) are the same tradeoffs you face when deciding what to fuse into the requantization pipeline.
 
 ---
 

@@ -349,6 +349,15 @@ Before moving to Unit 3, verify:
 
 ---
 
+## Side Quests
+
+- **SPI data path.** Replace UART (11.5 KB/s) with SPI (1–10 MB/s) using LiteX's `SPIMaster`. Re-run the breakeven calculation from this unit. At what element count does offloading actually win?
+- **Protocol fuzzer.** Write a Python script that sends malformed packets: wrong magic, truncated payloads, length fields that claim 65535 bytes, interleaved garbage. How robust is your firmware? Where does it hang or crash? Fixing these hardens the link protocol.
+- **USB CDC-ACM.** The Tang Nano 20K has USB-C. Use a CDC-ACM (virtual COM port) driver for 1+ MB/s throughput without any hardware changes. LiteX has a `USBDevice` peripheral — this is a real engineering detour but dramatically changes the bandwidth picture.
+- **Rust host side.** Rewrite `host/client.py` in Rust using the `serialport` crate. Python's serial library adds ~1 ms overhead per transaction. Measure the difference — it's larger than you'd expect for short packets.
+
+---
+
 ## Suggested Readings
 
 1. **GPU Driver Architecture:**
@@ -367,6 +376,10 @@ Before moving to Unit 3, verify:
 
 5. **CFU-Playground:**
    - [CFU-Playground GitHub](https://github.com/google/CFU-Playground) — the project this accelerator is inspired by. Study `avg_pdti8` for the Tier 2 (SIMD + requantisation) pattern.
+
+6. **Bare-Metal Embedded:**
+   - Elecia White, *Making Embedded Systems* (O'Reilly, 2nd ed.) — Ch. 4 on communication interfaces covers UART/SPI/I2C tradeoffs, and Ch. 7 on firmware architecture patterns. Directly applicable to your Zig firmware design.
+   - [Zig Language Reference](https://ziglang.org/documentation/master/) — `@cImport`, inline assembly, and `freestanding` target docs. Your firmware uses all three.
 
 ---
 

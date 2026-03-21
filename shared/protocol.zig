@@ -10,6 +10,8 @@ pub const MAGIC_RESP: u8 = 0xFC;
 pub const OpType = enum(u8) {
     ping = 0x0,
     mac4 = 0x1,
+    srdhm = 0x2,
+    rdbpot = 0x3,
     _,
 };
 
@@ -96,11 +98,33 @@ pub const Mac4 = struct {
     };
 };
 
+pub const Srdhm = struct {
+    pub const Req = extern struct {
+        a: i32,
+        b: i32,
+    };
+    pub const Resp = extern struct {
+        result: i32,
+    };
+};
+
+pub const Rdbpot = struct {
+    pub const Req = extern struct {
+        x: i32,
+        exponent: i32,
+    };
+    pub const Resp = extern struct {
+        result: i32,
+    };
+};
+
 pub fn ReqType(comptime op: OpType) type {
     return switch (op) {
         .ping => Ping.Req,
         .mac4 => Mac4.Req,
-        else => @compileError("uknown op type"),
+        .srdhm => Srdhm.Req,
+        .rdbpot => Rdbpot.Req,
+        else => @compileError("unknown op type"),
     };
 }
 
@@ -108,6 +132,8 @@ pub fn RespType(comptime op: OpType) type {
     return switch (op) {
         .ping => Ping.Resp,
         .mac4 => Mac4.Resp,
+        .srdhm => Srdhm.Resp,
+        .rdbpot => Rdbpot.Resp,
         else => @compileError("unknown op type"),
     };
 }

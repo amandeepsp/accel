@@ -325,6 +325,17 @@ Before moving to Unit 1, you should be able to:
 
 ---
 
+## Side Quests
+
+These are optional detours that broaden the project without blocking the main path.
+
+- **SPI instead of UART.** Replace the 115200-baud UART with SPI (1–10 MB/s). LiteX has `SPIMaster`. Nothing about the architecture changes — but the offload breakeven shifts by 100×, making the lowering decision in Unit 5 actually interesting.
+- **Smaller FPGA.** Port the SoC to an iCE40 UP5K (~5K LUTs, 8 DSPs, 128 KB SPRAM). What do you have to cut? Which layers of the stack survive? This forces you to confront which parts of the architecture are essential vs. nice-to-have.
+- **Different CPU core.** Replace VexRiscv with [PicoRV32](https://github.com/YosysHQ/picorv32) (smaller, fewer LUTs) or [SERV](https://github.com/olofk/serv) (the world's smallest RISC-V, 1 bit at a time). How does CPU choice affect the data-pump bottleneck from Unit 4?
+- **Visualise the SoC.** Use LiteX's `--doc` flag to auto-generate an SVG block diagram and HTML register map of your SoC. Compare it to the hand-drawn diagrams in this unit.
+
+---
+
 ## Suggested Readings
 
 - **tinygrad source:** `tinygrad/runtime/ops_gpu.py` — how tinygrad talks to a GPU. Notice the same host/device pattern.
@@ -333,6 +344,9 @@ Before moving to Unit 1, you should be able to:
 - **Paper:** Jouppi et al., ["In-Datacenter Performance Analysis of a Tensor Processing Unit"](https://arxiv.org/abs/1704.04760) (2017) — Google's TPU paper. Section 2 describes the host/device split for TPUs. Compare their systolic array to what you'll build in Unit 5.
 - **Blog:** Fabian Giesen, ["A Trip Through the Graphics Pipeline"](https://fgiesen.wordpress.com/2011/07/09/a-trip-through-the-graphics-pipeline-2011-index/) — deep dive into GPU pipeline stages. The command processor section maps directly to your VexRiscv firmware.
 - **Reference:** RISC-V ISA Manual, Section 2.2 (Base Instruction Formats) — the R-type encoding you'll use for custom instructions in Unit 1.
+- **Book:** Hennessy & Patterson, *Computer Architecture: A Quantitative Approach* (6th ed.) — Ch. 7 (Domain-Specific Architectures) covers TPUs, GPUs, and the host/device split in depth. The "roofline" model introduced here reappears in every unit.
+- **Book:** Sze et al., [*Efficient Processing of Deep Neural Networks*](https://arxiv.org/abs/2104.10462) (2020) — Ch. 1–3 for the full design space of neural network accelerators. This is the closest thing to a textbook for what you're building.
+- **Blog:** Horace He, ["Making Deep Learning Go Brrrr From First Principles"](https://horacehe.com/blog/2024/01/12/Making-Deep-Learning-Go-Brrrr-From-First-Principles.html) (2022) — accessible explanation of compute vs. memory bottlenecks in ML workloads. Makes the "why offload?" question concrete.
 
 ---
 

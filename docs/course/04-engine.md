@@ -484,6 +484,16 @@ K-tiling (splitting the input channel dimension across multiple passes) requires
 
 ---
 
+## Side Quests
+
+- **Hardware profiling counters.** Add CSR-readable cycle counters that measure: (a) cycles spent in compute, (b) cycles waiting for data, (c) cycles idle. Three counters, ~50 LUTs. This tells you *exactly* where utilization is lost — the numbers will surprise you.
+- **Interrupt-driven output.** Instead of polling the output FIFO, fire a RISC-V interrupt when the FIFO is half-full. The CPU can prefetch the next layer's config while waiting. LiteX's `EventManager` makes this straightforward.
+- **DMA engine.** Build a small DMA controller that copies from `main_ram` to BSRAM. The CPU writes source address, destination, and length into CSRs, then the DMA does the transfer autonomously. This is how real GPUs feed their SMs — and it's ~200 lines of Amaranth.
+- **PSRAM prefetch.** Connect the Tang Nano 20K's on-package 8 MiB PSRAM via LiteX's `litehyperbus`. Store the full model's weights in PSRAM, load into filter BSRAM per-layer. This removes the "weights must fit in BSRAM" constraint entirely.
+- **Double-buffer activations.** Use two activation BSRAM banks as a ping-pong pair: the sequencer reads from bank A while the CPU (or DMA) loads bank B. When a tile finishes, swap. This overlaps data loading with compute.
+
+---
+
 ## Suggested Readings
 
 1. **NVIDIA CUDA Programming Guide, Chapter 4: Hardware Implementation** — How SMs, warp schedulers, and shared memory actually work. The concepts map directly to what you built.
@@ -500,6 +510,10 @@ K-tiling (splitting the input channel dimension across multiple passes) requires
 
 5. **Efficient Processing of Deep Neural Networks (Sze et al., 2020)** — Textbook-length tutorial covering the full design space: dataflow, memory hierarchy, hardware mapping. Chapters 6-7 on dataflow and energy-efficient design are most relevant to this unit.
    [https://arxiv.org/abs/2104.10462](https://arxiv.org/abs/2104.10462)
+
+6. **FIFO and DMA Design:**
+   - Cummings, ["Simulation and Synthesis Techniques for Asynchronous FIFO Design"](http://www.sunburst-design.com/papers/CummingsSNUG2002SJ_FIFO1.pdf) (SNUG 2002) — the definitive paper on async FIFO design. Even though your FIFO is synchronous, the concepts (gray-code pointers, full/empty detection) apply.
+   - Patterson & Hennessy, *Computer Organization and Design: RISC-V Edition* — Ch. 5 on memory hierarchy. The DMA engine you might build for the PSRAM side quest is a simplified version of what this chapter describes.
 
 ---
 

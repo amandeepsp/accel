@@ -451,6 +451,15 @@ You have built a compiler backend that lowers high-level tensor operations to yo
 
 ---
 
+## Side Quests
+
+- **micrograd backend first.** Before tackling TinyGrad, write a backend for Karpathy's [micrograd](https://github.com/karpathy/micrograd) (~100 lines of Python). It's scalar-only, but exercises the same compile -> lower -> execute pipeline. Getting a scalar multiply to round-trip through your firmware proves the integration pattern before you fight TinyGrad's type system.
+- **ONNX path.** Skip TinyGrad entirely. Load an ONNX model with `onnx.load()`, walk the graph, and for each INT8 conv node, serialize the operation as a firmware command. This is simpler than a full backend and exercises the entire model -> hardware path.
+- **Estimated execution time.** Add a compiler pass that estimates execution time: `(N_macs / hw_throughput) + (N_bytes / uart_bandwidth)`. Print "estimated 2.3 ms on device vs 0.1 ms on host" to guide the lowering decision. This is a baby version of a cost model.
+- **Lowering visualizer.** Generate a DOT graph of the scheduled operations, colored by where they run (host = blue, device = orange). Pipe to Graphviz: `dot -Tpng`. This makes the lowering decision visible — you'll immediately see if you're offloading the wrong ops.
+
+---
+
 ## Suggested Readings
 
 1. **tinygrad source code** — The entire compiler pipeline in ~10K lines of Python. Start with `tinygrad/engine/schedule.py` (scheduling), `tinygrad/codegen/uopgraph.py` (UOp optimization), and `tinygrad/runtime/ops_cpu.py` (a complete backend).
@@ -467,6 +476,10 @@ You have built a compiler backend that lowers high-level tensor operations to yo
 
 5. **MLIR: Scaling Compiler Infrastructure for Domain Specific Computation (Lattner et al., 2021)** — The multi-level IR framework that underpins modern ML compilers. Understanding MLIR's "dialect" concept helps explain why tinygrad's UOps work: they're a single-level IR that's "low enough" for all targets. Your backend proves you can target custom hardware from this level.
    [https://arxiv.org/abs/2002.11054](https://arxiv.org/abs/2002.11054)
+
+6. **Compiler Foundations:**
+   - Cooper & Torczon, *Engineering a Compiler* (3rd ed.) — Ch. 1 (Overview) and Ch. 5 (Intermediate Representations). If you've never studied compilers formally, Ch. 5 explains why IRs like UOps exist and what makes a good one. Your firmware backend is a code generator in the classical sense.
+   - Chris Lattner, ["The Golden Age of Compiler Design in an Era of HW/SW Co-design"](https://www.youtube.com/watch?v=4HgShra-KnY) (keynote) — why ML workloads are driving a renaissance in compiler research. Directly motivates your project.
 
 ---
 

@@ -371,13 +371,26 @@ Correctness comes first. Always.
 **Next:** [Unit 7 -- Spatial Parallelism: Systolic Arrays](07-systolic.md)
 **Reference:** [Prior Art & Architecture Decisions](appendix-prior-art.md)
 
+## Side Quests
+
+- **Different model architectures.** Try [MCUNet](https://arxiv.org/abs/2007.10319) (designed for microcontrollers with <1 MB SRAM) or [SqueezeNet v1.1](https://arxiv.org/abs/1602.07360) (50x fewer parameters than AlexNet). How do their layer shapes differ from MobileNet? Which map better to your 4-wide MAC?
+- **INT4 quantization.** Quantize weights to 4 bits using [GPTQ](https://arxiv.org/abs/2210.17323) or simple min/max scaling. This halves weight storage and BSRAM bandwidth. You'll need a new MAC variant that unpacks two INT4 values from each byte — 8 lanes instead of 4.
+- **Accuracy vs. speed Pareto curve.** Run MobileNet v2 at width multipliers 0.1, 0.25, 0.5, 0.75, and 1.0. Plot top-1 accuracy vs. estimated inference time on your hardware. Where does the knee of the curve fall? This is the fundamental design tradeoff for edge ML.
+- **Layer-by-layer profiling.** For each layer in MobileNet v2 0.25, measure (or calculate): MAC count, weight bytes, activation bytes, and estimated cycles. Plot as a stacked bar chart. Which layers dominate? This tells you where to focus optimization effort.
+- **Person detection.** Run the same [person detection model](https://github.com/google/CFU-Playground/tree/main/common/src/models/pdti8) that CFU-Playground uses as its benchmark. Direct comparison of your numbers against Google's published results.
+
+---
+
 ## Suggested Readings
 
 | Topic | Source |
 |---|---|
 | MobileNet v2 paper | [arxiv.org/abs/1801.04381](https://arxiv.org/abs/1801.04381) -- Sandler et al., "MobileNetV2: Inverted Residuals and Linear Bottlenecks" |
+| MobileNet v1 paper | [arxiv.org/abs/1704.04861](https://arxiv.org/abs/1704.04861) -- Howard et al., "MobileNets: Efficient CNNs for Mobile Vision Applications." Read this first — v2 makes more sense with v1 context |
 | Quantization white paper | [arxiv.org/abs/1712.05877](https://arxiv.org/abs/1712.05877) -- Jacob et al., "Quantization and Training of Neural Networks for Efficient Integer-Arithmetic-Only Inference" |
 | TFLite quantization spec | [tensorflow.org/lite/performance/quantization_spec](https://www.tensorflow.org/lite/performance/quantization_spec) |
 | TFLite flatbuffer schema | [github.com/tensorflow/tensorflow/.../schema.fbs](https://github.com/tensorflow/tensorflow/blob/master/tensorflow/lite/schema/schema.fbs) |
 | Per-channel vs per-tensor quantization | [arxiv.org/abs/2004.09602](https://arxiv.org/abs/2004.09602) -- Nagel et al., "Up or Down? Adaptive Rounding for Post-Training Quantization" |
 | CFU-Playground model runner | [github.com/google/CFU-Playground](https://github.com/google/CFU-Playground) -- see `common/src/models/` for TFLite integration patterns |
+| MCUNet (tiny models for MCUs) | [arxiv.org/abs/2007.10319](https://arxiv.org/abs/2007.10319) -- Lin et al., "MCUNet: Tiny Deep Learning on IoT Devices." NAS-optimized models for <1 MB SRAM — directly applicable to your 8 KiB budget |
+| TinyML book | Pete Warden & Daniel Situnayake, *TinyML* (O'Reilly, 2019) — practical guide to running ML on microcontrollers. Ch. 7–9 cover quantization, model optimization, and deployment on constrained devices |

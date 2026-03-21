@@ -15,6 +15,8 @@ pub fn dispatch(header: link.Header) void {
     switch (header.op) {
         .ping => handle_ping(header),
         .mac4 => handle_mac4(header),
+        .srdhm => handle_srdhm(header),
+        .rdbpot => handle_rdbpot(header),
         else => link.send_error(header.seq_id, .unknown_op),
     }
 }
@@ -25,6 +27,46 @@ fn handle_ping(header: link.Header) void {
         return;
     }
     link.send_ok(header.seq_id, &.{}, 0);
+}
+
+fn handle_srdhm(header: link.Header) void {
+    if (header.payload_len != 8) {
+        link.send_error(header.seq_id, .bad_payload_len);
+        return;
+    }
+
+    var payload: [8]u8 = undefined;
+    uart.read_bytes(&payload);
+
+    const a: i32 = @bitCast(payload[0..4].*);
+    const b: i32 = @bitCast(payload[4..8].*);
+
+    const t0 = read_cycles();
+    const result = cfu.srdhm(a, b);
+    const t1 = read_cycles();
+
+    const result_bytes = std.mem.asBytes(&result);
+    link.send_ok(header.seq_id, result_bytes, t1 -% t0);
+}
+
+fn handle_rdbpot(header: link.Header) void {
+    if (header.payload_len != 8) {
+        link.send_error(header.seq_id, .bad_payload_len);
+        return;
+    }
+
+    var payload: [8]u8 = undefined;
+    uart.read_bytes(&payload);
+
+    const x: i32 = @bitCast(payload[0..4].*);
+    const exponent: i32 = @bitCast(payload[4..8].*);
+
+    const t0 = read_cycles();
+    const result = cfu.rdbpot(x, exponent);
+    const t1 = read_cycles();
+
+    const result_bytes = std.mem.asBytes(&result);
+    link.send_ok(header.seq_id, result_bytes, t1 -% t0);
 }
 
 fn handle_mac4(header: link.Header) void {

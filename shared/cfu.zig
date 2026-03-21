@@ -10,8 +10,8 @@ inline fn cfu_op(comptime funct3: u3, comptime funct7: u7, rs1: i32, rs2: i32) i
         : [rd] "=r" (-> i32),
         : [rs1] "r" (rs1),
           [rs2] "r" (rs2),
-          [f3] "i" (funct3),
-          [f7] "i" (funct7),
+          [f3] "i" (@as(u32, funct3)),
+          [f7] "i" (@as(u32, funct7)),
     );
 }
 
@@ -32,4 +32,18 @@ pub fn reset_accumulator() void {
 
 pub fn read_accumulator() i32 {
     return cfu_op(1, 0, 0x1, 0);
+}
+
+/// SRDHM: SaturatingRoundingDoubleHighMul.
+/// result = (a * b + (1 << 30)) >> 31, with saturation for INT32_MIN * INT32_MIN.
+/// Multi-cycle (2 cycles for normal path, 1 for saturation).
+pub inline fn srdhm(a: i32, b: i32) i32 {
+    return cfu_op(3, 0, a, b);
+}
+
+/// RDBPOT: RoundingDivideByPowerOfTwo.
+/// result = x >> exponent, with correct rounding.
+/// Single-cycle.
+pub inline fn rdbpot(x: i32, exponent: i32) i32 {
+    return cfu_op(4, 0, x, exponent);
 }

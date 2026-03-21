@@ -108,6 +108,18 @@ pub const Driver = struct {
         try self.issue(.mac4, protocol.Mac4.Req{ .as = as, .bs = bs }, &resp);
         return resp.result;
     }
+
+    pub fn srdhm(self: *Driver, a: i32, b: i32) !i32 {
+        var resp: protocol.Srdhm.Resp = undefined;
+        try self.issue(.srdhm, protocol.Srdhm.Req{ .a = a, .b = b }, &resp);
+        return resp.result;
+    }
+
+    pub fn rdbpot(self: *Driver, x: i32, exponent: i32) !i32 {
+        var resp: protocol.Rdbpot.Resp = undefined;
+        try self.issue(.rdbpot, protocol.Rdbpot.Req{ .x = x, .exponent = exponent }, &resp);
+        return resp.result;
+    }
 };
 
 fn statusToError(status: protocol.StatusCode) AccelError {

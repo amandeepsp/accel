@@ -22,6 +22,10 @@ dependencies = [
     "numpy>=2.2.6",
 ]
 
+[tool.pytest.ini_options]
+testpaths = ["hardware"]
+pythonpath = ["hardware"]
+
 [tool.uv.sources]
 litex = { path = "../litex/litex", editable = true }
 litex-boards = { path = "../litex/litex-boards", editable = true }

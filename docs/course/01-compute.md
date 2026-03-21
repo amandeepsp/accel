@@ -329,6 +329,15 @@ Before moving to Unit 2, verify:
 
 ---
 
+## Side Quests
+
+- **Binary neural networks.** Replace INT8 multiply-accumulate with XNOR + popcount. A single 32-bit XNOR+popcount does 32 binary MACs per cycle — 8× your INT8 throughput, at much lower precision. Read [Courbariaux et al., "Binarized Neural Networks"](https://arxiv.org/abs/1602.02830) for the theory, then implement a `BinaryMac32` instruction at funct3=1.
+- **Configurable precision.** Build a MAC that switches between INT8 (4 lanes) and INT4 (8 lanes) at runtime via funct7. INT4 doubles throughput for models that tolerate the accuracy loss. This is how NVIDIA's Tensor Cores handle multiple precisions.
+- **Verilog comparison.** Write the same SimdMac4 in raw Verilog. Compare: lines of code, testability, simulation speed, and synthesis results (LUT/DSP count). This gives you a concrete opinion on "is Amaranth worth it?"
+- **Accumulator overflow analysis.** The accumulator is 32-bit signed. For a conv layer with input_depth=1024, all inputs=127, all weights=127, offset=128: does it overflow? Calculate the worst case. If yes, design a saturating accumulator.
+
+---
+
 ## Suggested Readings
 
 - **tinygrad source:** `tinygrad/runtime/ops_cuda.py` — look at how tinygrad generates CUDA kernels. The inner loops compile down to instructions like `dp4a`.
@@ -338,6 +347,8 @@ Before moving to Unit 2, verify:
 - **Blog:** Bruce Hoult, ["Custom RISC-V Instructions"](https://hoult.org/riscv_custom_instructions.html) — practical guide to the CUSTOM_0 opcode space and inline assembly encoding.
 - **Reference:** CFU-Playground, [`proj/avg_pdti8/`](https://github.com/google/CFU-Playground/tree/main/proj/avg_pdti8) — a SIMD MAC very similar to yours, with TFLite integration. Compare their instruction encoding to yours.
 - **Paper:** Markidis et al., ["NVIDIA Tensor Core Programmability, Performance & Precision"](https://arxiv.org/abs/1803.04014) (2018) — how Tensor Cores evolved from dp4a-style operations to matrix-level instructions.
+- **Paper:** Jacob et al., ["Quantization and Training of Neural Networks for Efficient Integer-Arithmetic-Only Inference"](https://arxiv.org/abs/1712.05877) (2018) — the paper that defines the zero-point and scale conventions your MAC relies on. Section 2 derives why `input + offset` exists.
+- **Docs:** [Amaranth HDL Language Guide](https://amaranth-lang.org/docs/amaranth/latest/) — the official reference for the HDL you're writing hardware in. The "Signals and operators" section explains `.word_select()`, `.as_signed()`, and other primitives used in `mac.py`.
 
 ---
 
