@@ -174,105 +174,272 @@ The `first`/`last` signals are derived from the pointer position:
 
 The hardware processes the ENTIRE K dimension in one pass. No tiling, no partial-sum management, no CPU intervention.
 
-**Exercise 4b: Implement BSRAM stores for weights and activations.**
+### BSRAM Read Latency — The Prefetch Pattern
 
-Build the BSRAM stores in Amaranth. The filter store needs:
-- A write port (CPU loads weights before compute)
-- A read port with an auto-incrementing address counter
-- Cyclic wrap: address resets to 0 after reaching `K/4 - 1`
-- `first` and `last` output signals derived from the address counter
+BSRAM is synchronous: you set a read address on one clock edge, the data appears on the next. This 1-cycle latency matters for the compute loop.
 
-The activation store needs:
-- A write port (CPU loads activations before compute)
-- A read port with a sequential address counter
-- 4 banks, phase-rotated for conflict-free access
+The solution is a prefetch pattern. Two hardware address counters (one per store) drive the SRAM read ports. The SRAM's internal output register acts as the holding buffer — no extra flip-flops needed:
+
+```
+  Cycle -1 (prime):  addr ← 0                        (no data yet)
+  Cycle  0:          SRAM outputs data[0]             mac4_next uses it ✓
+                     consume → addr ← 1
+  Cycle  1:          SRAM outputs data[1]             mac4_next uses it ✓
+                     consume → addr ← 2
+  Cycle  2:          SRAM outputs data[2]             addi (loop overhead)
+  Cycle  3:          SRAM still outputs data[2]       bne  (addr unchanged)
+  Cycle  4:          SRAM still outputs data[2]       mac4_next uses it ✓
+                     consume → addr ← 3
+```
+
+Between `mac4_next` calls, the SRAM output stays stable because the address doesn't change. During loop overhead (addi, bne), the prefetched data waits — free latency hiding.
+
+**The two firmware rules:**
+1. **Prime before first `mac4_next`** — 1 cycle gap so SRAM can present data[0]
+2. **Write all data before prime** — no concurrent write + read
+
+**Exercise 4b: Implement BSRAM stores with prefetch counters.**
+
+The hardware you need for each store is minimal — an `amaranth.Memory` instance plus an address counter:
+
+```python
+# Filter store — ~15 lines of Amaranth
+filt_mem  = Memory(shape=32, depth=512, init=[])
+filt_rptr = Signal(16)   # read pointer: auto-inc on consume, wraps at k_count
+k_count   = Signal(16)   # wrap point, set via CFU instruction
+first     = Signal()     # filt_rptr == 0
+last      = Signal()     # filt_rptr == k_count - 1
+
+# Activation store — same pattern
+act_mem   = Memory(shape=32, depth=512, init=[])
+act_rptr  = Signal(16)   # read pointer: auto-inc on consume, firmware resets between channels
+```
+
+Write pointers live in firmware (the CPU passes explicit addresses). Read pointers and `k_count` live in hardware (5 signals + 2 comparators total).
 
 <details><summary>Hint 1</summary>
 
-Start with the filter store alone — it's simpler. Use Amaranth's `Memory` (or Gowin BSRAM primitive) with one write port and one read port. The key is the address counter: it increments every cycle during RUNNING, and wraps when it hits `k_count - 1`.
+Start with the filter store alone. Use Amaranth's `Memory` with one write port (driven by the `WriteRegs` instruction) and one read port (address driven by `filt_rptr`). The counter logic:
+
+```python
+# On consume (mac4_next fires):
+with m.If(consume):
+    with m.If(filt_rptr == k_count - 1):
+        m.d.sync += filt_rptr.eq(0)       # cyclic wrap
+    with m.Else():
+        m.d.sync += filt_rptr.eq(filt_rptr + 1)
+
+m.d.comb += first.eq(filt_rptr == 0)
+m.d.comb += last.eq(filt_rptr == k_count - 1)
+```
 
 </details>
 
 <details><summary>Hint 2</summary>
 
-The `first` signal is `address_counter == 0`. The `last` signal is `address_counter == k_count - 1`. These feed directly into the MAC unit to control accumulator reset and output latching. Study how Google's `mnv2_first` generates these from `FilterStore`.
+Wire the SRAM read data directly to the MAC operand mux — no holding register needed. The SRAM's internal output register IS the buffer. The `mac4_next` path (funct7=1) selects SRAM output instead of CPU `in0`/`in1`:
+
+```python
+m.d.comb += [
+    mac.in0.eq(Mux(is_mac4_next, act_mem_rd_data, self.cmd_in0)),
+    mac.in1.eq(Mux(is_mac4_next, filt_mem_rd_data, self.cmd_in1)),
+]
+```
 
 </details>
 
 <details><summary>Hint 3</summary>
 
-For the activation banks, you don't need full phase rotation in your first version. Start with a single activation BSRAM and sequential reads. Phase-rotated multi-bank access is an optimization for when you need higher read bandwidth (multiple spatial positions per cycle). Get single-bank working first, then generalize.
+For the activation store, start with a single BSRAM and sequential reads. Phase-rotated multi-bank access is an optimization for later. Get single-bank working first.
 
 </details>
 
-<details><summary>Solution</summary>See solutions/04-unit/bsram_stores.py</details>
+<details><summary>Solution</summary>See solutions/04-engine/bsram_stores.md</details>
 
 ---
 
-## 4.7  The Sequencer FSM — Your Warp Scheduler
+## 4.7  The Sequencer — Who Runs the Loop?
 
-The sequencer is the heart of autonomous compute. It replaces the CPU's inner loop with a hardware FSM that iterates over all `spatial x N x K/4` MAC operations.
+The core design question: something must iterate over all `spatial x N x K/4` MAC operations. You have two choices.
+
+### Option A: Hardware FSM Sequencer
+
+A dedicated FSM in Amaranth runs the triple-nested loop autonomously. The CPU writes config, asserts START, and waits for DONE. The MAC runs every cycle — no CPU involvement.
+
+### Option B: CPU-as-Sequencer (Software-Unrolled)
+
+The VexRiscv CPU runs the loop in firmware. The existing `SimdMac4` is unchanged — a `funct7=1` variant (`mac4_next`) muxes its operands from BSRAM read ports instead of CPU registers. Two hardware address counters auto-increment on each `mac4_next`, with the filter counter wrapping cyclically at `k_count`.
+
+The CFU instruction ABI extends the existing `WriteRegs`/`ReadRegs` pattern using `funct7` to sub-select registers:
 
 ```
-  FSM state diagram:
+  funct3  funct7  Name                  in0         in1
+  ──────  ──────  ────                  ───         ───
+    0       0     MAC4                  activations weights      (existing)
+    0       1     MAC4_NEXT             (ignored)   (ignored)    (reads from BSRAM)
 
-  IDLE --- (CPU writes START) ---> RUNNING
-                                     |
-                                     | (for each spatial position)
-                                     |   (for each output channel)
-                                     |     (for each K/4 chunk: MAC4)
-                                     |     (on last: requant -> FIFO write)
-                                     |
-                                     v
-  IDLE <--- (all outputs done) --- DONE
+    1       0     READ input_offset                              → value
+    1       1     READ accumulator                               → value
+
+    2       0     WRITE input_offset                in1=value
+    2       1     RESET accumulator
+    2       2     WRITE k_count                     in1=value
+    2       3     WRITE filter SRAM     in0=addr    in1=data
+    2       4     WRITE act SRAM        in0=addr    in1=data
+    2       5     WRITE param SRAM      in0=addr    in1=data
+    2       6     RESET filter read ptr (prime)
+    2       7     RESET act read ptr
+
+    3       0     SRDHM                 in0=a       in1=b        (existing)
+    4       0     RDBPOT                in0=x       in1=shift    (existing)
 ```
 
-During RUNNING, the sequencer:
-1. Reads filter data from filter BSRAM (cyclic, auto-incrementing)
-2. Reads activation data from activation BSRAM (sequential)
-3. Issues MAC4 to the compute pipeline
-4. On `last` (end of K dimension): triggers PostProcess (requant), writes INT8 result to output FIFO
-5. Advances to next output channel (resets activation read pointer, continues filter pointer)
-6. After all channels for all spatial positions: asserts DONE
+The firmware loop:
 
-**Exercise 4c: Implement the sequencer FSM.**
+```zig
+fn computeLayer(k_count: u16, n_channels: u16, spatial: u16) void {
+    cfu.setKCount(k_count);
 
-Build the three-state FSM (IDLE, RUNNING, DONE) that controls the autonomous compute loop. The RUNNING state must manage three nested counters: spatial position, output channel, and K-chunk.
+    for (0..spatial) |_| {
+        cfu.resetFilterRPtr();    // prime: resets to addr 0, SRAM presents data[0] next cycle
+        for (0..n_channels) |n| {
+            cfu.resetAcc();
+            cfu.resetActRPtr();   // same activations reused per channel
+
+            // Inner K loop — unrolled, back-to-back mac4_next works after prime
+            var k: u16 = 0;
+            while (k + 4 <= k_count) : (k += 4) {
+                _ = cfu.mac4Next();
+                _ = cfu.mac4Next();
+                _ = cfu.mac4Next();
+                _ = cfu.mac4Next();
+            }
+            while (k < k_count) : (k += 1) _ = cfu.mac4Next();
+
+            const acc = cfu.readAcc();
+            output[n] = requant(acc, params[n]);  // CPU-driven via SRDHM + RDBPOT
+        }
+    }
+}
+```
+
+### Cycle-by-Cycle Comparison
+
+For K=8 (2 MAC4 ops per channel), N=4 output channels, S=1 spatial. Total useful MAC4 ops = **8**.
+
+**Hardware FSM** — MAC4 every cycle, postprocess overlaps with next channel:
+
+```
+  Cycle:  0     1     2     3     4     5     6     7     8     9
+          ┌─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┐
+  MAC4:   │fill │ M0  │ M1  │ M2  │ M3  │ M4  │ M5  │ M6  │ M7  │
+          │     │ ch0 │ ch0 │ ch1 │ ch1 │ ch2 │ ch2 │ ch3 │ ch3 │
+          ├─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┤
+  PP:     │     │     │     │ PP0 │     │ PP1 │     │ PP2 │     │←PP3
+          └─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┘
+
+  MAC active: 8 / 10 = 80%
+```
+
+**CPU-driven, inner K unrolled** — MAC4 runs when CPU issues `mac4_next`, idle during loop overhead:
+
+```
+  Cycle:  0     1     2     3     4     5     6     7     8     9    10    11
+          ┌─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┐
+  CPU:    │ mac │ mac │ addi│ bne │ mac │ mac │ addi│ bne │ mac │ mac │ ... │
+          │ _nxt│ _nxt│ cnt │ loop│ _nxt│ _nxt│ cnt │ loop│ _nxt│ _nxt│     │
+          │ ch0 │ ch0 │     │     │ ch1 │ ch1 │     │     │ ch2 │ ch2 │     │
+          ├─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┤
+  MAC4:   │ ██  │ ██  │     │     │ ██  │ ██  │     │     │ ██  │ ██  │     │
+          └─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┘
+                        ▲▲                ▲▲
+                        └┴── loop overhead: MAC idle
+
+  MAC active: 8 / 12 = 67%
+```
+
+**CPU-driven, inner K NOT unrolled** — branch overhead on every MAC4:
+
+```
+  Cycle:  0     1     2     3     4     5     6     7     ...
+          ┌─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┐
+  CPU:    │ mac │ addi│ bne │ mac │ addi│ bne │ mac │ addi│
+          │ _nxt│ k-- │k_lp │ _nxt│ k-- │n_lp │ _nxt│ k-- │
+          ├─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┤
+  MAC4:   │ ██  │     │     │ ██  │     │     │ ██  │     │
+          └─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┘
+
+  MAC active: 1 per 3 cycles = 33%
+```
+
+### Utilization Scaling with K
+
+| K (input depth) | K/4 (MACs/ch) | HW FSM | CPU unrolled | CPU loop |
+|---|---|---|---|---|
+| 8 | 2 | 80% | 67% | 33% |
+| 16 | 4 | 89% | 80% | 33% |
+| 32 | 8 | 94% | 89% | 33% |
+| 64 | 16 | 97% | 94% | 33% |
+
+```
+  HW FSM:          MAC_cycles / (MAC_cycles + 1 + PP_drain)
+  CPU unrolled:    MAC_cycles / (MAC_cycles + 2 × N_channels)
+  CPU loop:        MAC_cycles / (MAC_cycles × 3)  →  always 33%
+```
+
+The gap between HW FSM and CPU-unrolled shrinks as K grows. For MobileNet layers (K=32–96), CPU-unrolled gives **89–97%** — nearly matching the hardware FSM with far less design complexity.
+
+### The Design Decision
+
+The CPU-as-sequencer approach is the right first step:
+
+1. **Simpler hardware.** No triple-nested counter FSM, no pipeline hazard tracking. The BSRAM stores and `mac4_next` instruction are the only new hardware.
+2. **Debuggable.** The firmware loop is readable Zig code. You can print intermediate values, add breakpoints, test one channel at a time.
+3. **Good enough.** For K≥16 (most real layers), CPU-unrolled achieves >80% MAC utilization.
+4. **Upgrade path.** The hardware FSM is a drop-in replacement for the firmware loop — same stores, same MAC, same postprocess. Build it as a stretch goal when you need the last 10%.
+
+> **MLSys Connection:** This mirrors the real GPU evolution. Early GPUs had fixed-function pipelines configured by the CPU. Programmable shaders came later, and only when the fixed-function approach couldn't express the needed operations. Google's TPU v1 also uses a host-configured sequencer — the host CPU sets up the systolic array configuration, then the hardware runs. Your CPU-as-sequencer is the same pattern: the CPU configures and drives the control flow, the hardware does the compute.
+
+**Exercise 4c: Implement `mac4_next` and the firmware sequencer.**
+
+Build a `mac4_next` CFU instruction that:
+- Reads the current word from the filter BSRAM (pre-staged address)
+- Reads the current word from the activation BSRAM
+- Feeds both to the existing SimdMac4
+- Auto-increments both read pointers
+- Generates `first`/`last` from the filter store's cyclic counter position
+
+Then write a firmware loop (in Zig or pseudocode) that uses `mac4_next` to compute a full 1x1 conv layer with K-unrolling.
 
 <details><summary>Hint 1</summary>
 
-Start with the counter logic. You need three counters:
-- `k_counter`: 0 to `K/4 - 1`, innermost loop
-- `n_counter`: 0 to `N - 1`, middle loop
-- `spatial_counter`: 0 to `num_spatial - 1`, outermost loop
-
-On each cycle in RUNNING: increment `k_counter`. When it wraps, increment `n_counter`. When `n_counter` wraps, increment `spatial_counter`. When `spatial_counter` wraps, transition to DONE.
+The `mac4_next` instruction is the composition of your existing `SimdMac4` with the BSRAM stores. It doesn't need `in0`/`in1` from the CPU — it reads operands directly from the stores. The CPU just issues the instruction; the hardware does the rest. The `first` signal resets the accumulator, the `last` signal means "this channel is done."
 
 </details>
 
 <details><summary>Hint 2</summary>
 
-The `first` and `last` signals come from `k_counter`:
-- `first = (k_counter == 0)` — tells the MAC to reset its accumulator
-- `last = (k_counter == k_limit - 1)` — tells the pipeline to emit a result
+For the firmware K-unrolling: if `K/4` is known at compile time (or at least bounded), you can use Zig's `comptime` to fully unroll the inner loop, eliminating all branch overhead. For variable K, unroll by 4 or 8 and handle the remainder.
 
-Connect `first` to the MAC's reset input (your existing `funct3[0]` reset mechanism). Connect `last` to the PostProcess pipeline's "latch output" signal.
+```zig
+// Unrolled by 4:
+var k: u16 = 0;
+while (k + 4 <= k_count) : (k += 4) {
+    _ = cfu.mac4_next();
+    _ = cfu.mac4_next();
+    _ = cfu.mac4_next();
+    _ = cfu.mac4_next();
+}
+while (k < k_count) : (k += 1) {
+    _ = cfu.mac4_next();  // remainder
+}
+```
 
 </details>
 
 <details><summary>Hint 3</summary>
 
-The address generation logic:
-- Filter store address = `n_counter * k_limit + k_counter` (or equivalently, a single counter that wraps every `k_limit` cycles — the cyclic pattern)
-- Activation address = `spatial_counter * k_limit + k_counter` (resets to the same spatial position's data for each output channel)
-- Param store address = `n_counter` (one set of requant params per output channel)
-- Output FIFO write = triggered on `last` after PostProcess pipeline latency
-
-</details>
-
-<details><summary>Hint 4</summary>
-
-Be careful with pipeline latency. If your PostProcess pipeline takes P cycles, the output FIFO write happens P cycles after `last` asserts. You need a shift register or delayed signal to track this. The sequencer should not transition to DONE until the last result has been written to the FIFO.
+The activation store read pointer must reset at the start of each output channel (same activations, different weights). The filter store pointer keeps advancing (different weights per channel). Add a `reset_act_ptr` signal or CFU instruction that the firmware calls between channels.
 
 </details>
 
@@ -324,29 +491,41 @@ For INT8 packing: the PostProcess pipeline emits one INT8 result at a time. Accu
 
 ## 4.9  Utilization Analysis
 
-Now measure what you've built. The whole point of autonomous compute is utilization — what fraction of cycles is the MAC actually computing?
+Now measure what you've built. The whole point of BSRAM stores + `mac4_next` is utilization — what fraction of cycles is the MAC actually computing?
 
 **Exercise 4e: Measure utilization.**
 
 For a 1x1 conv layer with 8 input channels, 8 output channels, and 4x4 spatial:
 
-**Part 2 (CPU as data pump):**
-- 16 spatial positions x 8 output channels x 2 MAC4 invocations x ~10 cycles (CSR overhead) = ~2560 cycles
-- MAC active cycles: 16 x 8 x 2 = 256
-- Utilization: 256 / 2560 = **10%**
+**Unit 2 baseline (CPU as data pump, per-element CFU calls):**
+- 16 spatial × 8 channels × 2 MAC4 invocations × ~3 cycles (CFU overhead) = ~768 cycles
+- MAC active cycles: 16 × 8 × 2 = 256
+- Utilization: 256 / 768 = **33%**
 
-**Part 3 target (autonomous with BSRAM):**
-- Load weights: 8 x 8 = 64 bytes into BSRAM via CSR writes = ~192 CPU cycles
-- Load activations: 16 x 8 = 128 bytes = ~384 CPU cycles
-- Compute (autonomous): 16 x 8 x 2 = 256 MAC cycles, pipelined
-- Drain FIFO: ~32 CPU cycles (128 INT8 outputs / 4 per word = 32 reads)
-- MAC active cycles during compute phase: 256
-- Total compute phase cycles: ~256 (MAC runs every cycle)
-- Utilization during compute: **~100%**
+**Unit 4 target (BSRAM stores + `mac4_next`, K-unrolled):**
+- Load weights: 8 × 8 = 64 bytes into BSRAM = ~64 CPU cycles
+- Load activations: 16 × 8 = 128 bytes = ~128 CPU cycles
+- Compute (firmware loop, K=8 unrolled):
+  - Per output element: 2 × `mac4_next` + 2 cycles outer loop = 4 cycles
+  - 16 × 8 = 128 output elements × 4 = 512 cycles
+  - MAC active: 256 of 512 = **67% during compute**
+- Drain output: 128 INT8 results = ~128 CPU cycles
+- Total: 64 + 128 + 512 + 128 = 832 cycles
+- MAC active: 256 / 832 = **31% end-to-end** (transfer-bound)
+- MAC active: 256 / 512 = **67% during compute** (compute-bound)
 
-The MAC never stalls during the autonomous compute phase. All the overhead moves to setup and teardown, which happen once per layer, not once per element.
+**With deeper K-unrolling or larger K:**
 
-> **MLSys Connection:** GPU kernel performance is measured in "occupancy" and "compute utilization." A kernel that achieves 80%+ SM utilization is considered well-optimized. Memory-bound kernels often see 30-50%. Your autonomous sequencer eliminates the control overhead that dominated the CPU-driven version, achieving near-perfect compute utilization for the actual compute phase. The remaining bottleneck is data loading — exactly the same situation as GPU kernels bottlenecked on global memory bandwidth.
+| Layer (S×N×K) | MAC ops | Compute cycles | Compute util | End-to-end util |
+|---|---|---|---|---|
+| 16×8×8 (tiny) | 256 | 512 | 67% | 31% |
+| 16×8×32 | 1024 | 1280 | 80% | 69% |
+| 16×32×32 | 4096 | 4608 | 89% | 84% |
+| 64×32×64 | 32768 | 34816 | 94% | 93% |
+
+The pattern: larger layers are compute-dominated (transfer overhead amortizes away). Smaller layers are transfer-dominated. This is the same roofline behavior as GPU kernels — small kernels are launch-overhead-bound, large kernels are compute-bound.
+
+> **MLSys Connection:** GPU kernel performance is measured in "occupancy" and "compute utilization." A kernel that achieves 80%+ SM utilization is considered well-optimized. Memory-bound kernels often see 30–50%. Your CPU-as-sequencer with K-unrolling achieves 67–94% MAC utilization during compute, depending on K depth. The remaining overhead is firmware loop management — the same overhead that GPU warp schedulers eliminate in hardware. The upgrade path to a hardware FSM sequencer (Section 4.12) eliminates this last gap.
 
 ---
 
@@ -358,25 +537,47 @@ The firmware simplifies dramatically:
   Unit 2 firmware:                   Unit 4 firmware:
   -------------------------          --------------------------
   receive data byte by byte          receive data in bulk
-  loop calling cfu.mac4()            load BSRAM (burst write)
-  track accumulator in software      configure sequencer registers
-  send result                        write START
-                                     wait for DONE
-                                     drain output FIFO
+  loop calling cfu.mac4()            load BSRAM via writeFilter/writeAct
+  track accumulator in software      prime prefetch, run K-unrolled loop
+  send result                        requant via SRDHM + RDBPOT
                                      send results
 ```
 
-The protocol changes too. Instead of streaming operands with each request, the host sends weight and activation blobs that get loaded into BSRAM. Then a short "execute" command triggers the sequencer. Then the host reads back the output FIFO.
-
-Think about the new `OpType` enum:
+The protocol changes too. Instead of streaming operands with each request, the host sends weight and activation blobs that get loaded into BSRAM. Then an "execute" command triggers the firmware compute loop. Then the host reads back results.
 
 ```
   OpType:
     load_weights = 0x01    // bulk-load weight data into filter BSRAM
     load_acts    = 0x02    // bulk-load activation data into act BSRAM
     load_params  = 0x03    // load requant params into param BSRAM
-    execute      = 0x04    // start autonomous compute
-    read_output  = 0x05    // drain output FIFO
+    configure    = 0x04    // set K, N, spatial, offsets
+    execute      = 0x05    // firmware runs compute loop, returns results
+    ping         = 0x06    // health check
+```
+
+The `cfu.zig` wrappers map directly to the funct3/funct7 ABI:
+
+```zig
+// funct3=0: compute
+pub inline fn mac4(a: i32, b: i32) i32 { return cfu_op(0, 0, a, b); }
+pub inline fn mac4Next() i32 { return cfu_op(0, 1, 0, 0); }
+
+// funct3=1: reads
+pub inline fn readAcc() i32 { return cfu_op(1, 1, 0, 0); }
+
+// funct3=2: writes (funct7 selects register)
+pub inline fn setInputOffset(v: i32) void { _ = cfu_op(2, 0, 0, v); }
+pub inline fn resetAcc() void { _ = cfu_op(2, 1, 0, 0); }
+pub inline fn setKCount(v: i32) void { _ = cfu_op(2, 2, 0, v); }
+pub inline fn writeFilter(addr: i32, data: i32) void { _ = cfu_op(2, 3, addr, data); }
+pub inline fn writeAct(addr: i32, data: i32) void { _ = cfu_op(2, 4, addr, data); }
+pub inline fn writeParam(addr: i32, data: i32) void { _ = cfu_op(2, 5, addr, data); }
+pub inline fn resetFilterRPtr() void { _ = cfu_op(2, 6, 0, 0); }
+pub inline fn resetActRPtr() void { _ = cfu_op(2, 7, 0, 0); }
+
+// funct3=3,4: requant (existing)
+pub inline fn srdhm(a: i32, b: i32) i32 { return cfu_op(3, 0, a, b); }
+pub inline fn rdbpot(x: i32, shift: i32) i32 { return cfu_op(4, 0, x, shift); }
 ```
 
 Compare this to CUDA's kernel launch sequence: `cuMemcpyHtoD()` (load data), `cuLaunchKernel()` (execute), `cuMemcpyDtoH()` (read results). The structure is identical.
@@ -387,15 +588,15 @@ Compare this to CUDA's kernel launch sequence: `cuMemcpyHtoD()` (load data), `cu
 
 After completing this unit, you should have:
 
-- [ ] Config registers that the CPU writes before compute (the compute descriptor)
-- [ ] BSRAM filter stores with cyclic read and `first`/`last` signal generation
-- [ ] BSRAM activation stores with sequential read
-- [ ] A sequencer FSM: IDLE -> RUNNING -> DONE
-- [ ] An output FIFO that the CPU drains after DONE
+- [ ] BSRAM filter store with auto-incrementing read, cyclic wrap, and `first`/`last` generation
+- [ ] BSRAM activation store with auto-incrementing read and pointer reset
+- [ ] A `mac4_next` CFU instruction that reads both stores, MACs, and auto-increments
+- [ ] Firmware loop with K-unrolling that drives the compute
+- [ ] An output buffer (FIFO or direct) that the CPU reads after compute
 - [ ] Correct INT8 output for a known matmul (compare against NumPy reference)
-- [ ] The CPU does NO work during the compute phase
+- [ ] Measured MAC utilization ≥ 67% during compute phase
 
-**The test:** CPU writes config + START, waits for DONE, drains FIFO. Correct INT8 output for a known input. Zero CPU involvement during compute.
+**The test:** Firmware loads weights + activations into BSRAM, runs the K-unrolled loop calling `mac4_next`, requants each output channel, stores results. Output matches NumPy reference for a known 1x1 conv (K=8, N=8, S=4×4).
 
 ---
 
@@ -475,12 +676,37 @@ K-tiling (splitting the input channel dimension across multiple passes) requires
 
 > **🔗 MLSys Connection:** How CUDA matmul kernels tile: thread blocks cover a 2D grid of output tiles, each block loads its tile of A and B into shared memory. The CUTLASS library's tile iterators are a production version of this.
 
+### Hardware FSM Sequencer
+
+Replace the firmware loop with a hardware FSM that runs the triple-nested loop (spatial × N × K/4) autonomously. The CPU writes config registers, asserts START, and waits for DONE.
+
+```
+  FSM state diagram:
+
+  IDLE --- (CPU writes START) ---> RUNNING
+                                     |
+                                     | for each spatial position:
+                                     |   for each output channel:
+                                     |     for each K/4 chunk: MAC4
+                                     |     on last: requant → FIFO write
+                                     |
+                                     v
+  IDLE <--- (all outputs done) --- DONE
+```
+
+This eliminates all firmware loop overhead — the MAC runs every cycle during RUNNING. Utilization goes from 67–94% (CPU-driven) to 80–97% (hardware FSM). The gain is largest for small K values where loop overhead dominates.
+
+The stores, MAC, and postprocess pipeline are unchanged — the FSM is a drop-in replacement for the firmware loop. You need three hardware counters (`k_counter`, `n_counter`, `spatial_counter`) and address generation logic for each store.
+
+> **🔗 MLSys Connection:** This is the GPU warp scheduler — hardware that decides what to execute each cycle, eliminating software loop overhead entirely. The tradeoff: more hardware complexity for higher utilization. Worth it when the workload justifies the design effort.
+
 ### Recommended order
 
-1. **Command queue** — biggest bang for complexity. Eliminates per-tile CPU round trips.
-2. **Double-buffer** — nearly free given existing 2 filter BSRAMs. Layer on top of command queue.
-3. **2D tiling** — needed when MobileNet layers don't fit. Orthogonal to the above.
-4. **Async load / layer fusion** — powerful but high complexity. Pursue if you want to push utilization toward theoretical limits.
+1. **Hardware FSM sequencer** — drop-in replacement for firmware loop. Biggest utilization gain for small K layers.
+2. **Command queue** — biggest bang for complexity. Eliminates per-tile CPU round trips.
+3. **Double-buffer** — nearly free given existing 2 filter BSRAMs. Layer on top of command queue.
+4. **2D tiling** — needed when MobileNet layers don't fit. Orthogonal to the above.
+5. **Async load / layer fusion** — powerful but high complexity. Pursue if you want to push utilization toward theoretical limits.
 
 ---
 
