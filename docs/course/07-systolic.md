@@ -1,19 +1,32 @@
 # Unit 7: Spatial Parallelism — Systolic Arrays and Tensor Cores
 
-> **Course:** [00-architecture](00-architecture.md) > [01-compute](01-compute.md) > [02-vertical-slice](02-vertical-slice.md) > [03-fusion](03-fusion.md) > [04-engine](04-engine.md) > [05-compiler](05-compiler.md) > [06-model](06-model.md) > **[07-systolic](07-systolic.md)**
+> **Series:** [00-architecture](00-architecture.md) → [01-compute](01-compute.md) → [02-datapath](02-datapath.md) → [03-fusion](03-fusion.md) → [04-engine](04-engine.md) → [05-compiler](05-compiler.md) → [06-model](06-model.md) → **[07-systolic](07-systolic.md)** → [08-feeding](08-feeding.md) → [09-modern](09-modern.md) → [10-redesign](10-redesign.md)
 > **Reference:** [Prior Art & Architecture Decisions](appendix-prior-art.md)
 
 ---
 
 An NVIDIA Tensor Core does a 4x4x4 matrix multiply per cycle. Google's TPU v1 has a 128x128 systolic array. You're building a 4x4 -- same concept, 1000x smaller.
 
-The previous units gave you a working accelerator with a single 4-wide SIMD MAC. This unit replaces that single pipeline with a grid of processing elements that compute in parallel, turning one matmul cycle into sixteen.
+The current repo still has a single 4-wide SIMD MAC. This unit is an architectural capstone: when does it make sense to replace that single pipeline with a grid of processing elements, and what new memory-system and scheduling problems does that create?
+
+> **Status:**
+> - `Implemented in repo:` single 4-wide SIMD MAC, integer post-processing blocks, instruction-level host/device path
+> - `Design exercise:` PE design, array simulation, dataflow choice, tiling math
+> - `Stretch:` full integration with Unit 4 local stores and control path on FPGA
+
+> **Learning note:** Real accelerators do use systolic or tensor-style arrays, but the array itself is only half the story. Feeding it, tiling it, and choosing a dataflow are the real architectural work.
 
 ---
 
 ## 7.1  When to Scale
 
-Before building anything, measure what you have. From your Unit 4 autonomous engine:
+Before building anything, measure what you have. Use your best current baseline: the direct CFU path if that is what exists today, or a future Unit 4 engine if you have already built it. The point is to compare one SIMD MAC against a spatial array, not to assume one specific implementation path.
+
+You can engage with this unit at three levels:
+
+- `Architecture:` choose a dataflow and justify it
+- `Simulation:` build and verify the array in Amaranth simulation
+- `Integration:` connect it to local stores and a control path
 
 ```
   Single 4-wide MAC, 27 MHz:
@@ -128,12 +141,12 @@ Google's `hps_accel` chose output-stationary. Why? Because the accumulator is th
 
 Pick weight-stationary or output-stationary for your 4x4 array. Justify your choice based on:
 1. Your BSRAM layout (how many filter stores do you have?)
-2. Your sequencer design (does it already support first/last signals?)
+2. Your control-path design (does it already support first/last signals?)
 3. The K dimensions of MobileNet v2 0.25 layers (are they small enough for single-pass OS?)
 
 <details><summary>Hint 1</summary>
 
-If you built the autonomous sequencer from Unit 4 with first/last accumulator control, output-stationary is a natural fit -- you already have the control signals. If your sequencer manages explicit K-dimension tiles, weight-stationary is simpler to integrate.
+If you built the Unit 4 engine with first/last accumulator control, output-stationary is a natural fit -- you already have the control signals. If your control path manages explicit K-dimension tiles, weight-stationary is simpler to integrate.
 
 </details>
 
@@ -143,13 +156,13 @@ For MobileNet v2 0.25, the largest K dimension (input depth) in a pointwise conv
 
 </details>
 
-<details><summary>Solution</summary>See solutions/07-systolic/dataflow_analysis.md</details>
-
 ---
 
 ## 7.4  Building the Array
 
 Build incrementally. Do NOT skip to the full array. Each step catches different bugs.
+
+Steps 1-3 are valuable even if you never integrate the array with the rest of the accelerator. They teach timing, skew, dataflow, and verification in isolation.
 
 ### Step 1: Single PE
 
@@ -180,8 +193,6 @@ The activation passthrough must be registered (1-cycle delay), not combinational
 
 </details>
 
-<details><summary>Solution</summary>See solutions/07-systolic/pe.py</details>
-
 ### Step 2: 1D Row (4 PEs)
 
 Wire 4 PEs in a row. `act_out` of PE[i] connects to `act_in` of PE[i+1]. Each PE has an independent `psum_in` (from the row above, or 0 for the top row).
@@ -193,8 +204,6 @@ Wire 4 PEs in a row. `act_out` of PE[i] connects to `act_in` of PE[i+1]. Each PE
 Because of the 1-cycle activation delay per PE, the activation reaches PE[0] at cycle 0, PE[1] at cycle 1, PE[2] at cycle 2, PE[3] at cycle 3. The partial sums at each PE are offset in time accordingly. You need to account for this skew when collecting results.
 
 </details>
-
-<details><summary>Solution</summary>See solutions/07-systolic/row.py</details>
 
 ### Step 3: 2D Array (4x4)
 
@@ -228,24 +237,20 @@ Off-by-one timing in the skew is the most common systolic array bug. If your 4x4
 
 </details>
 
-<details><summary>Solution</summary>See solutions/07-systolic/array.py</details>
-
 ### Step 4: Integration
 
-Wire the 4x4 array to your BSRAM stores and autonomous sequencer from Unit 4.
+If you proceed to full integration, wire the 4x4 array to your BSRAM stores and engine control path from Unit 4.
 
 - Filter BSRAM feeds weights to each column
 - Activation BSRAM feeds activations to each row (with skew)
 - Partial sum outputs at the bottom connect to your post-processing pipeline
-- The sequencer drives first/last signals and address counters
+- The control path drives first/last signals and address counters
 
 <details><summary>Hint 1</summary>
 
-The sequencer needs to know the array dimensions (4x4) to generate the correct address patterns. For the activation skew, the sequencer can either: (a) read from 4 different BSRAM addresses offset by the skew amount, or (b) read sequentially and let hardware skew FIFOs handle the delay.
+The control path needs to know the array dimensions (4x4) to generate the correct address patterns. For the activation skew, it can either: (a) read from 4 different BSRAM addresses offset by the skew amount, or (b) read sequentially and let hardware skew FIFOs handle the delay.
 
 </details>
-
-<details><summary>Solution</summary>See solutions/07-systolic/integration.py</details>
 
 ---
 
@@ -287,11 +292,9 @@ Compare against the single-MAC version from Unit 4: `2304 x 8 x 16 / 4 = 73,728`
 
 </details>
 
-<details><summary>Solution</summary>See solutions/07-systolic/tiling_calc.py</details>
-
 ### Exercise: Modify the Sequencer
 
-Update your autonomous sequencer to iterate over tiles:
+Update your Unit 4 control path to iterate over tiles:
 
 ```
   for each weight tile (column strip):
@@ -308,9 +311,7 @@ The outer loop (weight tiles) reloads filter BSRAM. The inner loop (activation t
 
 </details>
 
-<details><summary>Solution</summary>See solutions/07-systolic/tiled_sequencer.py</details>
-
-> **MLSys Connection:** Tiling for a systolic array is the same problem as tiling for GPU shared memory. In CUDA, you load tiles of A and B into shared memory, compute a partial result, then load the next tiles. The tile size is determined by shared memory capacity (48 KiB on Ampere). In XLA, the `dot_dimension_numbers` and `lhs_contracting_dimensions` in the HLO tell the compiler how to tile. In TVM, `schedule.tile()` does this explicitly. Your sequencer FSM is a hardware implementation of what CUDA's threadblock-level tiling does in software.
+> **MLSys Connection:** Tiling for a systolic array is the same problem as tiling for GPU shared memory. In CUDA, you load tiles of A and B into shared memory, compute a partial result, then load the next tiles. The tile size is determined by shared memory capacity (48 KiB on Ampere). In XLA, the `dot_dimension_numbers` and `lhs_contracting_dimensions` in the HLO tell the compiler how to tile. In TVM, `schedule.tile()` does this explicitly. Your future control path is a hardware implementation of what CUDA's threadblock-level tiling does in software.
 
 ---
 
@@ -350,8 +351,6 @@ The Gowin synthesis report shows the critical path in the "Timing Analysis" sect
 
 </details>
 
-<details><summary>Solution</summary>See solutions/07-systolic/clock_scaling.md</details>
-
 ### The Memory Wall
 
 Your 4x4 array can consume data much faster than PSRAM can deliver:
@@ -385,7 +384,7 @@ BSRAM is fast enough to feed the array at 27 MHz. But if you need to reload from
 
 ## 7.7  GPU Parallel: How This Maps to Real Hardware
 
-Your 4x4 systolic array computes `C[4x4] = A[4xK] x B[Kx4]` in `K + 6` cycles. Here is how that compares to production hardware:
+Assuming a 4x4 implementation, your systolic array computes `C[4x4] = A[4xK] x B[Kx4]` in `K + 6` cycles. Here is how that compares to production hardware:
 
 | | Your Array | NVIDIA Tensor Core | Google TPU v1 |
 |---|---|---|---|
@@ -407,21 +406,23 @@ The TPU v1's 256x256 array is 4096x larger than yours. But each PE is functional
 
 ## 7.8  Checkpoint
 
-Run the matmul benchmark from Unit 4 on your 4x4 systolic array. Compare against the single-MAC baseline.
+Depending on how far you implement the array, your checkpoint can stop at architecture, simulation, or full integration.
 
+- [ ] I can explain weight-stationary vs output-stationary tradeoffs
+- [ ] I can justify a dataflow choice for this FPGA and workload
 - [ ] Single PE passes unit tests (multiply-accumulate + passthrough)
 - [ ] 1D row computes correct dot products
 - [ ] 4x4 array matches `numpy.matmul` on random test cases
 - [ ] Activation skew timing is correct (draw the diagram, verify with simulation)
-- [ ] Array is integrated with BSRAM stores and sequencer
-- [ ] Tiling works for layers larger than 4x4
-- [ ] **4x throughput improvement** on the matmul benchmark from Unit 4
-- [ ] I can explain weight-stationary vs output-stationary tradeoffs
+- [ ] If I integrated the array, it works with local stores and a control path
+- [ ] If I integrated tiling, the design handles layers larger than 4x4
+- [ ] If I benchmarked it, I can explain the measured speedup and what prevents perfect scaling
 - [ ] I understand the memory bandwidth bottleneck and what helps
 
 ---
 
-**Previous:** [Unit 6 -- End-to-End: Run a Real Model](06-model.md)
+**Previous:** [Unit 6 — End-to-End: Run a Real Model](06-model.md)
+**Next:** [Unit 8 — Feeding the Beast](08-feeding.md)
 **Reference:** [Prior Art & Architecture Decisions](appendix-prior-art.md)
 
 ## Side Quests
@@ -431,6 +432,9 @@ Run the matmul benchmark from Unit 4 on your 4x4 systolic array. Compare against
 - **Roofline analysis.** Build a roofline model for your specific hardware: 27 MHz, 16 MACs/cycle peak, 108 MB/s BSRAM bandwidth. Plot where each MobileNet layer falls. Identify which layers are compute-bound vs. memory-bound. The roofline tells you exactly when scaling the array helps vs. when you need more bandwidth.
 - **Clock pushing.** Use the PLL to push clock speed: 27 -> 54 -> 81 -> 108 MHz. Add pipeline registers to the PE critical path if timing fails. Document the frequency ceiling and what limits it (array? VexRiscv? routing?). This is the cheapest 2–4x speedup available.
 - **2x2 first.** Build a 2x2 array, get it fully passing all tests, then scale to 4x4. The 2x2 array catches every timing and control bug with 4x fewer signals to debug. The jump from 2x2 to 4x4 should be parameterized — change one constant, resynthesize.
+- **NVDLA comparison.** Read the NVDLA convolution engine docs and write down three ways a production design handles feeding and scheduling differently from your array.
+
+If you want one concrete implementation starting point, see `docs/course/solutions/07-systolic/pe.py`.
 
 ---
 

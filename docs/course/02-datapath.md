@@ -1,8 +1,10 @@
 # Unit 2: The Data Path — Drivers and Command Submission
 
-> **Course:** [01-compute](01-compute.md) | **02-datapath** | [03-fusion](03-fusion.md) | [04-autonomy](04-autonomy.md)
+> **Series:** [00-architecture](00-architecture.md) → [01-compute](01-compute.md) → **[02-datapath](02-datapath.md)** → [03-fusion](03-fusion.md) → [04-engine](04-engine.md) → [05-compiler](05-compiler.md) → [06-model](06-model.md) → [07-systolic](07-systolic.md) → [08-feeding](08-feeding.md) → [09-modern](09-modern.md) → [10-redesign](10-redesign.md)
 >
 > Learn how ML compilers and GPU hardware work, by building a tiny version on a Tang Nano 20K FPGA.
+
+> **Learning note:** The UART path in this repo is intentionally slow and simple. Real accelerators use faster transports, DMA, queues, and interrupts. Here the bottleneck is a feature: it makes launch overhead and control-plane cost visible.
 
 ---
 
@@ -300,7 +302,7 @@ If your "kernel" does 100,000 MACs *without returning to the host*, the overhead
 This motivates everything that comes next:
 
 - **Unit 3 (Fusion):** Keep intermediate results on-chip instead of round-tripping them through UART. Fusing MAC + requantisation saves multiple round trips per output element.
-- **Unit 4 (Autonomy):** Move the entire inner loop into hardware so the firmware triggers one "execute" command instead of thousands of individual MAC commands.
+- **Unit 4 (Execution engine):** Move control ownership toward local memory plus a sequencer so the firmware triggers one higher-level compute step instead of thousands of individual MAC commands.
 - **Bandwidth upgrades:** SPI (10 MB/s) is ~1000x faster than UART. PCIe (32 GB/s) is ~3,000,000x faster. The architecture patterns you learn here transfer directly.
 
 > **🔗 MLSys Connection:** This is why `torch.compile` and XLA exist. Without compilation, PyTorch eagerly launches one kernel per operation — like sending one MAC at a time over UART. With compilation, the framework fuses operations and launches one big kernel — like batching thousands of MACs into a single command. The speedup isn't from faster compute; it's from amortising launch overhead.

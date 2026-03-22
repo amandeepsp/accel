@@ -1,6 +1,6 @@
-# Unit 3: Kernel Fusion — Why Round Trips Kill You
+# Unit 3: Data Movement and Fusion — Why Round Trips Kill You
 
-> **Course:** [01-compute](01-compute.md) | [02-datapath](02-datapath.md) | **03-fusion** | [04-autonomy](04-autonomy.md)
+> **Series:** [00-architecture](00-architecture.md) → [01-compute](01-compute.md) → [02-datapath](02-datapath.md) → **[03-fusion](03-fusion.md)** → [04-engine](04-engine.md) → [05-compiler](05-compiler.md) → [06-model](06-model.md) → [07-systolic](07-systolic.md) → [08-feeding](08-feeding.md) → [09-modern](09-modern.md) → [10-redesign](10-redesign.md)
 >
 > Learn how ML compilers and GPU hardware work, by building a tiny version on a Tang Nano 20K FPGA.
 
@@ -474,4 +474,4 @@ If the final INT8 value matches your Python reference, your fusion pipeline is c
 ---
 
 **Previous:** [Unit 2 — The Data Path](02-datapath.md)
-**Next:** [Unit 4 — Autonomous Compute: Taking the CPU Off the Hot Path](04-autonomy.md)
+**Next:** [Unit 4 — The Execution Engine: Control, Local Memory, and Scheduling](04-engine.md)

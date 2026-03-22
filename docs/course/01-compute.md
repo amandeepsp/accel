@@ -1,6 +1,6 @@
 # Unit 1: Custom Compute — ALUs and Intrinsics
 
-> **Course:** [00-architecture](00-architecture.md) > **[01-compute](01-compute.md)**
+> **Series:** [00-architecture](00-architecture.md) → **[01-compute](01-compute.md)** → [02-datapath](02-datapath.md) → [03-fusion](03-fusion.md) → [04-engine](04-engine.md) → [05-compiler](05-compiler.md) → [06-model](06-model.md) → [07-systolic](07-systolic.md) → [08-feeding](08-feeding.md) → [09-modern](09-modern.md) → [10-redesign](10-redesign.md)
 
 ---
 
@@ -311,7 +311,7 @@ A single A100 GPU has 6,912 CUDA cores, each capable of `dp4a`. You have one. Bu
 
 Tensor Cores go further: instead of a 1x4 dot product, they do a 4x4x4 matrix multiply in one cycle. That's 64 MACs per Tensor Core per cycle. But if you unroll it, each one is doing what your `SimdMac4` does, just spatially replicated and interconnected.
 
-> **MLSys Connection:** The progression from `dp4a` (1x4 dot product) to Tensor Cores (4x4x4 matmul) to the H100's FP8 Tensor Cores (bigger matrices, lower precision) is the same progression this course follows: Tier 2 (your SIMD MAC) -> Tier 4 (systolic array in Unit 5). You're walking the same design path NVIDIA did from Pascal to Hopper, at FPGA scale.
+> **MLSys Connection:** The progression from `dp4a` (1x4 dot product) to Tensor Cores (4x4x4 matmul) to the H100's FP8 Tensor Cores (bigger matrices, lower precision) is the same progression this course follows: Tier 2 (your SIMD MAC) -> Tier 4 (systolic array in Unit 7). You're walking the same design path NVIDIA did from Pascal to Hopper, at FPGA scale.
 
 ---
 
@@ -353,3 +353,4 @@ Before moving to Unit 2, verify:
 ---
 
 **Previous:** [Unit 0: Architecture](00-architecture.md)
+**Next:** [Unit 2 — The Data Path: Drivers and Command Submission](02-datapath.md)

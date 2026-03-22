@@ -1,6 +1,6 @@
 # Unit 0: Architecture — How GPUs Actually Work
 
-> **Course:** **[00-architecture](00-architecture.md)** > [01-compute](01-compute.md)
+> **Series:** **[00-architecture](00-architecture.md)** → [01-compute](01-compute.md) → [02-datapath](02-datapath.md) → [03-fusion](03-fusion.md) → [04-engine](04-engine.md) → [05-compiler](05-compiler.md) → [06-model](06-model.md) → [07-systolic](07-systolic.md) → [08-feeding](08-feeding.md) → [09-modern](09-modern.md) → [10-redesign](10-redesign.md)
 
 ---
 
@@ -290,7 +290,7 @@ The "lowering decision" is: **can the hardware do this operation faster than the
 
 On a GPU, the answer is almost always "yes" for large tensor operations because PCIe bandwidth is high and GPU throughput is enormous. On your system, the calculus is different. UART is slow. Your CFU does 4 MACs per cycle at 27 MHz. The breakeven point — where offloading beats the host CPU — depends on the operation size.
 
-> **MLSys Connection:** This is exactly what `torch.compile()` does internally. The compiler traces the graph, identifies subgraphs that can run on the device, and generates kernel code for those subgraphs. Everything else falls back to eager CPU execution. TinyGrad's scheduler makes the same decision — and in Unit 4, you'll write the hook that tells it about your hardware.
+> **MLSys Connection:** This is exactly what `torch.compile()` does internally. The compiler traces the graph, identifies subgraphs that can run on the device, and generates kernel code for those subgraphs. Everything else falls back to eager CPU execution. TinyGrad's scheduler makes the same decision — and in Unit 5, you'll write the hook that tells it about your hardware.
 
 ---
 
@@ -341,7 +341,7 @@ These are optional detours that broaden the project without blocking the main pa
 - **tinygrad source:** `tinygrad/runtime/ops_gpu.py` — how tinygrad talks to a GPU. Notice the same host/device pattern.
 - **tinygrad source:** `tinygrad/engine/schedule.py` — the scheduler that decides what to lower and what to fuse.
 - **Blog:** Fabien Sanglard, ["How GPUs Work"](https://fabiensanglard.net/gpu/index.html) — visual walkthrough of the GPU pipeline from command queue to pixel output.
-- **Paper:** Jouppi et al., ["In-Datacenter Performance Analysis of a Tensor Processing Unit"](https://arxiv.org/abs/1704.04760) (2017) — Google's TPU paper. Section 2 describes the host/device split for TPUs. Compare their systolic array to what you'll build in Unit 5.
+- **Paper:** Jouppi et al., ["In-Datacenter Performance Analysis of a Tensor Processing Unit"](https://arxiv.org/abs/1704.04760) (2017) — Google's TPU paper. Section 2 describes the host/device split for TPUs. Compare their systolic array to what you'll build in Unit 7.
 - **Blog:** Fabian Giesen, ["A Trip Through the Graphics Pipeline"](https://fgiesen.wordpress.com/2011/07/09/a-trip-through-the-graphics-pipeline-2011-index/) — deep dive into GPU pipeline stages. The command processor section maps directly to your VexRiscv firmware.
 - **Reference:** RISC-V ISA Manual, Section 2.2 (Base Instruction Formats) — the R-type encoding you'll use for custom instructions in Unit 1.
 - **Book:** Hennessy & Patterson, *Computer Architecture: A Quantitative Approach* (6th ed.) — Ch. 7 (Domain-Specific Architectures) covers TPUs, GPUs, and the host/device split in depth. The "roofline" model introduced here reappears in every unit.

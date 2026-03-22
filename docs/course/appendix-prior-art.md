@@ -1,6 +1,6 @@
 # Appendix — Prior Art Deep Dive & Architecture Decisions
 
-> **Parent:** [05-scaling](05-scaling.md)
+> **Reference For:** [04-engine](04-engine.md) → [05-compiler](05-compiler.md) → [06-model](06-model.md) → [07-systolic](07-systolic.md) → [08-feeding](08-feeding.md) → [09-modern](09-modern.md) → [10-redesign](10-redesign.md)
 >
 > This document records everything learned from studying existing ML
 > accelerator designs and challenges every architectural assumption made

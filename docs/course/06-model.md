@@ -1,11 +1,16 @@
 # Unit 6: End-to-End — Run a Real Model
 
-> **Course:** [00-architecture](00-architecture.md) > [01-compute](01-compute.md) > [02-vertical-slice](02-vertical-slice.md) > [03-fusion](03-fusion.md) > [04-engine](04-engine.md) > [05-compiler](05-compiler.md) > **[06-model](06-model.md)** > [07-systolic](07-systolic.md)
+> **Series:** [00-architecture](00-architecture.md) → [01-compute](01-compute.md) → [02-datapath](02-datapath.md) → [03-fusion](03-fusion.md) → [04-engine](04-engine.md) → [05-compiler](05-compiler.md) → **[06-model](06-model.md)** → [07-systolic](07-systolic.md) → [08-feeding](08-feeding.md) → [09-modern](09-modern.md) → [10-redesign](10-redesign.md)
 > **Reference:** [Prior Art & Architecture Decisions](appendix-prior-art.md)
 
 ---
 
-You've built compute (MAC4), fused post-processing (SRDHM+RDBPOT), an autonomous execution engine, and a compiler backend. Now run a real model.
+This unit is where toy demos meet real deployment constraints. Depending on how far you've implemented Units 4 and 5, this can be a planning unit, a correctness harness, or a full end-to-end runner. The goal is the same either way: understand what it takes to map a real quantized model onto constrained hardware.
+
+> **Status:**
+> - `Implemented in repo:` MAC path, integer post-processing primitives, host/device protocol building blocks
+> - `Design exercise:` model parsing, operator placement, tiling, and a runner that maps supported layers to the accelerator path
+> - `Stretch:` a full end-to-end hardware-backed MobileNet runner
 
 Everything so far has been exercised on synthetic data -- hand-crafted weight matrices, known inputs, expected outputs. This unit connects the full stack to a production-grade quantized neural network and asks one question: **does the top-1 prediction match the reference?**
 
@@ -122,13 +127,11 @@ Reference: TFLite's `QuantizeMultiplierSmallerThanOne` in `tensorflow/lite/kerne
 
 </details>
 
-<details><summary>Solution</summary>See solutions/06-model/extract_quant_params.py</details>
-
 ---
 
-## 6.5  The Ops Your Hardware Handles
+## 6.5  The Ops Your First Accelerator Path Handles
 
-Your hardware accelerates **pointwise (1x1) convolutions**. These are matrix multiplications:
+A sensible first accelerator target is **pointwise (1x1) convolutions**. These are matrix multiplications:
 
 ```
   1x1 Conv with C_in input channels, C_out output channels, H x W spatial:
@@ -142,11 +145,13 @@ Your hardware accelerates **pointwise (1x1) convolutions**. These are matrix mul
 
 Pointwise convolutions are the **heavy compute ops** in MobileNet v2. They contain the vast majority of multiply-accumulate operations because they operate across all channels.
 
+This is exactly the kind of narrowing real accelerator teams do early on: pick the dense, dominant operator first, and leave the long tail on CPU until the contract is stable.
+
 ---
 
-## 6.6  The Ops Your Hardware Does NOT Handle
+## 6.6  The Ops You Should Leave On CPU First
 
-These run on the host CPU (or in firmware on the RISC-V):
+For a first end-to-end system, these are good candidates to keep on the host CPU (or in firmware on the RISC-V):
 
 | Op | Why not hardware? |
 |---|---|
@@ -155,6 +160,8 @@ These run on the host CPU (or in firmware on the RISC-V):
 | **Average pooling** | Simple reduction. Few MACs relative to convolutions. |
 | **Fully connected** | Only the final classifier layer. Small enough (e.g., 16 x 1001) that CPU handles it fine. |
 | **Add (residual)** | Element-wise addition for skip connections. Memory-bound, not compute-bound. |
+
+Real accelerators often do support some of these operations eventually. The question is not "can hardware do it?" The question is "is it the right next thing to harden?"
 
 ### Exercise: Where's the 80/20?
 
@@ -178,8 +185,6 @@ For MobileNet v2, the pointwise convolutions typically account for 75-85% of tot
 Use your parameter extraction script from 6.4 to get the tensor shapes, then compute MACs directly from the shapes. No need to run the model.
 
 </details>
-
-<details><summary>Solution</summary>See solutions/06-model/mac_breakdown.py</details>
 
 > **MLSys Connection:** This exercise is exactly what ML compiler engineers do when deciding which ops to lower to a hardware backend vs. leave on CPU. In XLA (Google's ML compiler), the "cost model" estimates how expensive each op is and routes it accordingly. In TVM, the `relay.transform.AnnotateTarget` pass marks ops for offloading. You are doing manual operator placement -- the same problem, at a smaller scale.
 
@@ -234,8 +239,6 @@ The key insight: weight loading is amortized across all spatial tiles.
 
 </details>
 
-<details><summary>Solution</summary>See solutions/06-model/tiling.py</details>
-
 > **MLSys Connection:** Tiling is the fundamental technique in every ML compiler. NVIDIA's cuDNN tiles convolutions to fit in shared memory (48 KiB on Ampere). Google's XLA tiles matmuls to fit in TPU HBM scratch. TVM's `schedule` primitives (`tile`, `split`, `reorder`) exist entirely to control tiling. The constraint is always the same: fast memory is small, so you must break the problem into pieces that fit. Your 8 KiB BSRAM is a miniature version of a GPU's shared memory.
 
 ---
@@ -244,7 +247,13 @@ The key insight: weight loading is amortized across all spatial tiles.
 
 ### Exercise: End-to-End Inference
 
-Write an inference runner that classifies an image using your FPGA accelerator. The structure:
+There are three honest versions of this exercise:
+
+- `Mapping only:` parse the model, identify supported vs unsupported layers, and produce a placement plan
+- `Correctness harness:` run supported layers through a software model of your accelerator path and the rest on CPU
+- `Full runner:` execute the supported layers on hardware and validate against TFLite
+
+Write the strongest version you can support. The structure is the same:
 
 ```
   1. Load the TFLite model
@@ -310,11 +319,9 @@ for tile in tiles:
     tile_result = device.read_output()
 ```
 
-If you don't have hardware yet, write a software simulator that does the same math your hardware would do (MAC4 + SRDHM + RDBPOT), to validate the data flow before touching the FPGA.
+If you do not have the full engine path yet, write a software simulator that does the same math your hardware would do (MAC4 + SRDHM + RDBPOT), or use the current instruction-level path as a narrow correctness oracle for small cases. Validate the data flow before demanding full FPGA execution.
 
 </details>
-
-<details><summary>Solution</summary>See solutions/06-model/inference_runner.py</details>
 
 ---
 
@@ -338,16 +345,16 @@ When your output doesn't match the reference, the bug is almost always in quanti
 
 ## 6.10  What "Correct" Means
 
-If your inference runner produces the same top-1 class as the TFLite reference interpreter for a given image, you have proven:
+At full completion, if your inference runner produces the same top-1 class as the TFLite reference interpreter for a given image, you have proven:
 
 1. Your MAC hardware computes correctly
 2. Your SRDHM+RDBPOT fusion matches the TFLite requantization spec
-3. Your autonomous sequencer iterates correctly over channels and spatial positions
+3. Your engine control path iterates correctly over channels and spatial positions
 4. Your tiling logic preserves output correctness across tile boundaries
 5. Your compiler/host code correctly extracts and transmits model parameters
 6. Your UART/bus protocol delivers data without corruption
 
-That is the **entire stack**, from Python framework down to gate-level hardware, producing a correct answer on a real model. Slow is fine. It will be slow -- UART bandwidth limits you to seconds per inference. That's okay. Performance comes from:
+That is the **entire stack**, from model parsing down to hardware execution, producing a correct answer on a real model. Slow is fine. It will be slow -- UART bandwidth limits you to seconds per inference. That's okay. Performance comes from:
 - Unit 7 (systolic array -- 4x compute throughput)
 - Higher clock speeds (2-4x)
 - Better bus interfaces (SPI/USB -- 100-1000x over UART)
@@ -360,15 +367,17 @@ Correctness comes first. Always.
 
 - [ ] I can extract quantization parameters from a TFLite flatbuffer
 - [ ] I can calculate MAC counts per layer and identify the hardware/CPU split
+- [ ] I can explain why pointwise conv is the right first accelerator target for MobileNet v2 0.25
 - [ ] I have a tiling strategy for layers that exceed BSRAM capacity
-- [ ] I have an inference runner that processes all layer types (hardware + CPU fallback)
-- [ ] My top-1 prediction matches the TFLite reference interpreter
+- [ ] I have either a mapping plan, a correctness harness, or a full inference runner
+- [ ] I understand which parts of the full path are implemented today and which are still design targets
+- [ ] If I built the full runner, my top-1 prediction matches the TFLite reference interpreter
 - [ ] I can debug quantization mismatches using layer-by-layer comparison
 
 ---
 
-**Previous:** [Unit 5 -- Compiler Backend](05-compiler.md)
-**Next:** [Unit 7 -- Spatial Parallelism: Systolic Arrays](07-systolic.md)
+**Previous:** [Unit 5 — The Compiler](05-compiler.md)
+**Next:** [Unit 7 — Spatial Parallelism: Systolic Arrays](07-systolic.md)
 **Reference:** [Prior Art & Architecture Decisions](appendix-prior-art.md)
 
 ## Side Quests
@@ -378,6 +387,9 @@ Correctness comes first. Always.
 - **Accuracy vs. speed Pareto curve.** Run MobileNet v2 at width multipliers 0.1, 0.25, 0.5, 0.75, and 1.0. Plot top-1 accuracy vs. estimated inference time on your hardware. Where does the knee of the curve fall? This is the fundamental design tradeoff for edge ML.
 - **Layer-by-layer profiling.** For each layer in MobileNet v2 0.25, measure (or calculate): MAC count, weight bytes, activation bytes, and estimated cycles. Plot as a stacked bar chart. Which layers dominate? This tells you where to focus optimization effort.
 - **Person detection.** Run the same [person detection model](https://github.com/google/CFU-Playground/tree/main/common/src/models/pdti8) that CFU-Playground uses as its benchmark. Direct comparison of your numbers against Google's published results.
+- **Operator placement memo.** Write down a table for every MobileNet layer: target device, reason, working-set fit, and likely bottleneck. This is a miniature version of a real deployment plan.
+
+If you want one software-first reference sketch, see `docs/course/solutions/06-model/mobilenet_runner.py`.
 
 ---
 
@@ -394,3 +406,4 @@ Correctness comes first. Always.
 | CFU-Playground model runner | [github.com/google/CFU-Playground](https://github.com/google/CFU-Playground) -- see `common/src/models/` for TFLite integration patterns |
 | MCUNet (tiny models for MCUs) | [arxiv.org/abs/2007.10319](https://arxiv.org/abs/2007.10319) -- Lin et al., "MCUNet: Tiny Deep Learning on IoT Devices." NAS-optimized models for <1 MB SRAM — directly applicable to your 8 KiB budget |
 | TinyML book | Pete Warden & Daniel Situnayake, *TinyML* (O'Reilly, 2019) — practical guide to running ML on microcontrollers. Ch. 7–9 cover quantization, model optimization, and deployment on constrained devices |
+| ONNX Runtime execution providers | [onnxruntime.ai/docs/execution-providers](https://onnxruntime.ai/docs/execution-providers/) -- a good real-world reference for operator placement and fallback |
