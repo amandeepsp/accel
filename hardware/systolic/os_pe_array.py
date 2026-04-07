@@ -16,16 +16,14 @@ class OutputStationaryPEArray(wiring.Component):
 
     After K + num_rows + num_cols - 2 cycles, all PEs hold their output.
 
-    Output: C-wide drain. Assert drain=1 to shift results down the column.
-    Bottom row outputs one row of results per cycle. Takes R cycles to drain all.
-    Row R-1 exits first (cycle 0 of drain), row 0 exits last (cycle R-1).
+    Output: R×C direct ports. Each PE's accumulator is exposed as
+    psum_out_{r}_{c}, readable combinationally after computation completes.
 
     Ports:
-      act_in_{r}   - activation inputs (pre-skew), one per row
-      w_in_{c}     - weight inputs (pre-skew), one per column
-      psum_out_{c} - C-wide output (bottom row), read during drain
-      psum_load    - reset all accumulators
-      drain        - shift results down column for readout
+      act_in_{r}       - activation inputs (pre-skew), one per row
+      w_in_{c}         - weight inputs (pre-skew), one per column
+      psum_out_{r}_{c} - direct accumulator output per PE
+      psum_load       - reset all accumulators
     """
 
     def __init__(self, num_rows: int, num_cols: int, in_width=8, acc_width=32):
@@ -39,9 +37,10 @@ class OutputStationaryPEArray(wiring.Component):
             ports[f"act_in_{r}"] = In(signed(in_width))
         for c in range(num_cols):
             ports[f"w_in_{c}"] = In(signed(in_width))
-            ports[f"psum_out_{c}"] = Out(signed(acc_width))
+        for r in range(num_rows):
+            for c in range(num_cols):
+                ports[f"psum_out_{r}_{c}"] = Out(signed(acc_width))
         ports["psum_load"] = In(1)
-        ports["drain"] = In(1)
 
         super().__init__(ports)
 
@@ -84,20 +83,15 @@ class OutputStationaryPEArray(wiring.Component):
             for r in range(1, rows):
                 m.d.comb += pes[r][c].w_in.eq(pes[r - 1][c].w_out)
 
-        # Psum drain chain: top row gets 0, flows down during drain
-        for c in range(cols):
-            m.d.comb += pes[0][c].psum_in.eq(0)
-            for r in range(1, rows):
-                m.d.comb += pes[r][c].psum_in.eq(pes[r - 1][c].psum_out)
-            m.d.comb += getattr(self, f"psum_out_{c}").eq(
-                pes[rows - 1][c].psum_out)
+        # Direct R×C accumulator outputs
+        for r in range(rows):
+            for c in range(cols):
+                m.d.comb += getattr(self, f"psum_out_{r}_{c}").eq(
+                    pes[r][c].psum_out)
 
         # Broadcast control
         for r in range(rows):
             for c in range(cols):
-                m.d.comb += [
-                    pes[r][c].psum_load.eq(self.psum_load),
-                    pes[r][c].drain.eq(self.drain),
-                ]
+                m.d.comb += pes[r][c].psum_load.eq(self.psum_load)
 
         return m

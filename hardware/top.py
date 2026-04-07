@@ -4,17 +4,13 @@ from amaranth import ClockSignal, ResetSignal, Signal
 from amaranth.back.verilog import convert
 from amaranth.lib.memory import Memory
 from cfu import Cfu
-from epilogue.quant import RoundingDividebyPOTInstruction, SRDHMInstruction
 
 
 class Top(Cfu):
     STORE_DEPTH = 512
 
     def elab_instructions(self, m):
-        m.submodules["srdhm"] = srdhm = SRDHMInstruction()
-        m.submodules["rdpot"] = rdpot = RoundingDividebyPOTInstruction()
-
-        return {3: srdhm, 4: rdpot}
+        return {}
 
 
 if __name__ == "__main__":

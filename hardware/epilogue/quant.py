@@ -1,12 +1,19 @@
 from amaranth import Elaboratable, Module, Mux, Signal, signed
 
-from cfu import Instruction
-
 INT32_MIN = -(1 << 31)
 INT32_MAX = (1 << 31) - 1
 
 
 class SRDHM(Elaboratable):
+    """1-stage pipelined SRDHM.
+
+    Registers the 32x32 multiply (the timing bottleneck at 48 MHz).
+    Nudge, extract, and saturation are combinational from the registered product.
+
+    Latency: 1 cycle (start -> done).
+    Throughput: 1 result/cycle.
+    """
+
     def __init__(self) -> None:
         self.a = Signal(signed(32))
         self.b = Signal(signed(32))
@@ -17,41 +24,31 @@ class SRDHM(Elaboratable):
     def elaborate(self, platform):
         m = Module()
 
-        m.d.sync += self.done.eq(0)
-        ab = Signal(signed(64))
         nudge = 1 << 30
-        with m.FSM():
-            with m.State("stage0"):
-                with m.If(self.start):
-                    with m.If((self.a == INT32_MIN) & (self.b == INT32_MIN)):
-                        m.d.sync += [
-                            self.out.eq(INT32_MAX),
-                            self.done.eq(1),
-                        ]
-                    with m.Else():
-                        m.d.sync += ab.eq(self.a * self.b)
-                        m.next = "stage1"
-            with m.State("stage1"):
-                m.d.sync += [
-                    self.out.eq((ab + nudge)[31:]),
-                    self.done.eq(1),
-                ]
-                m.next = "stage0"
 
-        return m
-
-
-class SRDHMInstruction(Instruction):
-    def elaborate(self, platform):
-        m = super().elaborate(platform)
-        m.submodules["srdhm"] = srdhm = SRDHM()
+        # Combinational: multiply + saturation detect
+        ab = Signal(signed(64))
+        saturate = Signal()
         m.d.comb += [
-            srdhm.a.eq(self.in0s),
-            srdhm.b.eq(self.in1s),
-            srdhm.start.eq(self.start),
-            self.output.eq(srdhm.out),
-            self.done.eq(srdhm.done),
+            ab.eq(self.a * self.b),
+            saturate.eq((self.a == INT32_MIN) & (self.b == INT32_MIN)),
         ]
+
+        # Register stage: latch multiply result (the long pole for timing)
+        reg_ab = Signal(signed(64))
+        reg_saturate = Signal()
+
+        m.d.sync += self.done.eq(0)
+        with m.If(self.start):
+            m.d.sync += [
+                reg_ab.eq(ab),
+                reg_saturate.eq(saturate),
+                self.done.eq(1),
+            ]
+
+        # Combinational tail: nudge + extract high bits
+        m.d.comb += self.out.eq(Mux(reg_saturate, INT32_MAX, (reg_ab + nudge)[31:]))
+
         return m
 
 
@@ -75,15 +72,3 @@ class RoundingDividebyPOT(Elaboratable):
         return m
 
 
-class RoundingDividebyPOTInstruction(Instruction):
-    def elaborate(self, platform):
-        m = super().elaborate(platform)
-        rdbypot = RoundingDividebyPOT()
-        m.submodules["RDByPOT"] = rdbypot
-        m.d.comb += [
-            rdbypot.x.eq(self.in0s),
-            rdbypot.exponent.eq(self.in1),
-            self.output.eq(rdbypot.result),
-            self.done.eq(1),
-        ]
-        return m

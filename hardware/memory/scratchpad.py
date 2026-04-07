@@ -1,5 +1,5 @@
 from amaranth import Module, Signal
-from amaranth.lib import wiring
+from amaranth.lib import data, wiring
 from amaranth.lib.wiring import In, Out
 from amaranth.lib.memory import Memory
 
@@ -11,24 +11,25 @@ class DoubleScratchpad(wiring.Component):
     Write port writes to the fill bank. Read port reads from the compute bank.
     Assert swap for one cycle to toggle which bank is fill vs compute.
 
-    Each bank: depth × 32 bits (maps to one B-SRAM block at depth=512).
+    Each bank: depth × line_shape (maps to B-SRAM blocks).
     Read latency: 1 cycle (synchronous SRAM).
 
     bank_sel=0: write→A, read→B
     bank_sel=1: write→B, read→A
     """
 
-    def __init__(self, depth=512):
+    def __init__(self, depth=512, line_shape=32):
         self.depth = depth
+        self.line_shape = line_shape
         self.addr_bits = (depth - 1).bit_length()
 
         super().__init__(
             {
                 "wr_addr": In(self.addr_bits),
-                "wr_data": In(32),
+                "wr_data": In(line_shape),
                 "wr_en": In(1),
                 "rd_addr": In(self.addr_bits),
-                "rd_data": Out(32),
+                "rd_data": Out(line_shape),
                 "swap": In(1),
             }
         )
@@ -42,9 +43,9 @@ class DoubleScratchpad(wiring.Component):
             m.d.sync += bank_sel.eq(~bank_sel)
 
         m.submodules["mem_a"] = mem_a = Memory(
-            shape=32, depth=self.depth, init=[])
+            shape=self.line_shape, depth=self.depth, init=[])
         m.submodules["mem_b"] = mem_b = Memory(
-            shape=32, depth=self.depth, init=[])
+            shape=self.line_shape, depth=self.depth, init=[])
 
         wr_a = mem_a.write_port()
         wr_b = mem_b.write_port()

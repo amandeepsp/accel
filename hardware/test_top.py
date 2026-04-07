@@ -1,8 +1,4 @@
-"""CFU top-level integration tests via valid/ready handshake.
-
-Thorough quant tests live in epilogue/quant.py. These are smoke tests
-that verify the CFU handshake wiring is correct.
-"""
+"""CFU top-level integration tests via valid/ready handshake."""
 
 from amaranth.sim import Simulator
 
@@ -37,43 +33,8 @@ class TestCfuTop:
 
         raise TimeoutError(f"CFU did not respond within {max_cycles} cycles")
 
-    def test_srdhm_smoke(self):
-        """SRDHM responds through the CFU handshake."""
-
-        async def testbench(ctx):
-            result = await self._issue_cmd(
-                ctx, dut, funct3=3, funct7=0,
-                in0=1000000, in1=1000000,
-            )
-            # Just verify we get a non-zero response — thorough tests in quant.py
-            assert result != 0
-
-        dut = Top()
-        sim = Simulator(dut)
-        sim.add_clock(1e-6)
-        sim.add_testbench(testbench)
-        with sim.write_vcd("waves/test_cfu_srdhm.vcd"):
-            sim.run()
-
-    def test_rdbpot_smoke(self):
-        """RDBPOT responds through the CFU handshake."""
-
-        async def testbench(ctx):
-            result = await self._issue_cmd(
-                ctx, dut, funct3=4, funct7=0,
-                in0=100, in1=2,
-            )
-            assert result == 25  # 100 / 4
-
-        dut = Top()
-        sim = Simulator(dut)
-        sim.add_clock(1e-6)
-        sim.add_testbench(testbench)
-        with sim.write_vcd("waves/test_cfu_rdbpot.vcd"):
-            sim.run()
-
     def test_fallback_instruction(self):
-        """Unused funct3 slots return in0 (fallback behavior)."""
+        """All funct3 slots return in0 (fallback behavior)."""
 
         async def testbench(ctx):
             result = await self._issue_cmd(

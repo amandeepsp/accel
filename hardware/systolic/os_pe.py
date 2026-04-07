@@ -12,12 +12,9 @@ class OutputStationaryPE(wiring.Component):
 
     Modes (priority order):
       psum_load=1: acc ← 0         (reset for new tile)
-      drain=1:     acc ← psum_in   (shift from PE above, for readout)
       else:        acc += act * w   (compute)
 
-    psum_out = acc (combinational read).
-    During drain, results shift down the column — bottom row outputs
-    one row of results per cycle, C-wide. Takes R cycles to drain all.
+    psum_out = acc (combinational read, directly exposed for R×C readback).
     """
 
     def __init__(self, in_width=8, acc_width=32):
@@ -31,8 +28,6 @@ class OutputStationaryPE(wiring.Component):
                 "w_in": In(signed(in_width)),
                 "w_out": Out(signed(in_width)),
                 "psum_load": In(1),
-                "drain": In(1),
-                "psum_in": In(signed(acc_width)),
                 "psum_out": Out(signed(acc_width)),
             }
         )
@@ -47,8 +42,6 @@ class OutputStationaryPE(wiring.Component):
 
         with m.If(self.psum_load):
             m.d.sync += acc.eq(0)
-        with m.Elif(self.drain):
-            m.d.sync += acc.eq(self.psum_in)
         with m.Else():
             m.d.sync += acc.eq(acc + self.act_in * self.w_in)
 

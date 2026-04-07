@@ -76,8 +76,6 @@ class TestSRDHM:
             ctx.set(dut.b, b)
             ctx.set(dut.start, 1)
             await ctx.tick()
-            ctx.set(dut.start, 0)
-            await ctx.tick()
             assert ctx.get(dut.done) == 1
             result = to_signed32(ctx.get(dut.out))
             assert result == expected, f"srdhm({a}, {b}): expected {expected}, got {result}"
@@ -96,8 +94,6 @@ class TestSRDHM:
             ctx.set(dut.a, 0)
             ctx.set(dut.b, 12345)
             ctx.set(dut.start, 1)
-            await ctx.tick()
-            ctx.set(dut.start, 0)
             await ctx.tick()
             assert ctx.get(dut.done) == 1
             assert to_signed32(ctx.get(dut.out)) == 0

@@ -6,13 +6,11 @@ from os_pe_array import OutputStationaryPEArray
 class TestOutputStationaryPEArray:
     def test_2x2_matmul(self):
         """
-        C = A @ B, 2x2 OS array. C-wide drain output.
+        C = A @ B, 2x2 OS array. R×C direct output.
           A = [[1, 2],   B = [[5, 6],
                [3, 4]]        [7, 8]]
           C = [[19, 22],
                [43, 50]]
-
-        Drain reads bottom row first (row 1), then row 0 shifts down.
         """
 
         async def testbench(ctx):
@@ -41,18 +39,11 @@ class TestOutputStationaryPEArray:
             await ctx.tick()
             await ctx.tick()
 
-            # Drain: row 1 (bottom) exits first, then row 0
-            ctx.set(dut.drain, 1)
-            await ctx.delay(1e-7)
-            # Before first drain tick: bottom row has its own values
-            assert ctx.get(dut.psum_out_0) == 43  # C[1][0]
-            assert ctx.get(dut.psum_out_1) == 50  # C[1][1]
-
-            await ctx.tick()
-            # Row 0 shifted down into bottom row
-            assert ctx.get(dut.psum_out_0) == 19  # C[0][0]
-            assert ctx.get(dut.psum_out_1) == 22  # C[0][1]
-            ctx.set(dut.drain, 0)
+            # All results available directly
+            assert ctx.get(dut.psum_out_0_0) == 19  # C[0][0]
+            assert ctx.get(dut.psum_out_0_1) == 22  # C[0][1]
+            assert ctx.get(dut.psum_out_1_0) == 43  # C[1][0]
+            assert ctx.get(dut.psum_out_1_1) == 50  # C[1][1]
 
         dut = OutputStationaryPEArray(2, 2)
         sim = Simulator(dut)
@@ -63,7 +54,7 @@ class TestOutputStationaryPEArray:
 
     def test_2x2_with_negatives(self):
         """
-        Signed matmul with C-wide drain.
+        Signed matmul with R×C direct output.
           A = [[ 1, -2],   B = [[-3,  4],
                [ 5,  6]]        [ 7, -8]]
           C = [[-17, 20],
@@ -92,16 +83,10 @@ class TestOutputStationaryPEArray:
             await ctx.tick()
             await ctx.tick()
 
-            # Drain: bottom row first
-            ctx.set(dut.drain, 1)
-            await ctx.delay(1e-7)
-            assert ctx.get(dut.psum_out_0) == 27   # C[1][0]
-            assert ctx.get(dut.psum_out_1) == -28   # C[1][1]
-
-            await ctx.tick()
-            assert ctx.get(dut.psum_out_0) == -17   # C[0][0]
-            assert ctx.get(dut.psum_out_1) == 20    # C[0][1]
-            ctx.set(dut.drain, 0)
+            assert ctx.get(dut.psum_out_0_0) == -17  # C[0][0]
+            assert ctx.get(dut.psum_out_0_1) == 20   # C[0][1]
+            assert ctx.get(dut.psum_out_1_0) == 27   # C[1][0]
+            assert ctx.get(dut.psum_out_1_1) == -28  # C[1][1]
 
         dut = OutputStationaryPEArray(2, 2)
         sim = Simulator(dut)
@@ -112,7 +97,7 @@ class TestOutputStationaryPEArray:
 
     def test_4x4_matmul(self):
         """
-        4x4 OS array, K=4, C-wide drain (4 cycles to read all rows).
+        4x4 OS array, K=4, R×C direct output.
           A = [[1, 0, 2, -1],    B = [[ 1, 2, 0, -1],
                [0, 3, -1, 0],         [ 0, 1, 3,  2],
                [2, 1, 0, 4],          [-1, 0, 1,  0],
@@ -155,19 +140,12 @@ class TestOutputStationaryPEArray:
             for _ in range(6):
                 await ctx.tick()
 
-            # Drain: bottom row (3) first, then 2, 1, 0
-            ctx.set(dut.drain, 1)
-            for drain_cycle in range(4):
-                row = 3 - drain_cycle
-                if drain_cycle == 0:
-                    await ctx.delay(1e-7)
-                else:
-                    await ctx.tick()
+            # All R×C results available directly
+            for r in range(4):
                 for c in range(4):
-                    val = ctx.get(getattr(dut, f"psum_out_{c}"))
-                    assert val == expected[row][c], \
-                        f"C[{row}][{c}] = {val}, expected {expected[row][c]}"
-            ctx.set(dut.drain, 0)
+                    val = ctx.get(getattr(dut, f"psum_out_{r}_{c}"))
+                    assert val == expected[r][c], \
+                        f"C[{r}][{c}] = {val}, expected {expected[r][c]}"
 
         dut = OutputStationaryPEArray(4, 4)
         sim = Simulator(dut)
@@ -202,15 +180,11 @@ class TestOutputStationaryPEArray:
             await ctx.tick()
             await ctx.tick()
 
-            # Drain first tile
-            ctx.set(dut.drain, 1)
-            await ctx.delay(1e-7)
-            assert ctx.get(dut.psum_out_0) == 3   # C[1][0]
-            assert ctx.get(dut.psum_out_1) == 4   # C[1][1]
-            await ctx.tick()
-            assert ctx.get(dut.psum_out_0) == 1   # C[0][0]
-            assert ctx.get(dut.psum_out_1) == 2   # C[0][1]
-            ctx.set(dut.drain, 0)
+            # First tile results
+            assert ctx.get(dut.psum_out_0_0) == 1   # C[0][0]
+            assert ctx.get(dut.psum_out_0_1) == 2   # C[0][1]
+            assert ctx.get(dut.psum_out_1_0) == 3   # C[1][0]
+            assert ctx.get(dut.psum_out_1_1) == 4   # C[1][1]
 
             # Reset and second tile: same A, B=[[2,0],[0,3]]
             ctx.set(dut.psum_load, 1)
@@ -234,14 +208,10 @@ class TestOutputStationaryPEArray:
             await ctx.tick()
             await ctx.tick()
 
-            ctx.set(dut.drain, 1)
-            await ctx.delay(1e-7)
-            assert ctx.get(dut.psum_out_0) == 6    # C[1][0]
-            assert ctx.get(dut.psum_out_1) == 12   # C[1][1]
-            await ctx.tick()
-            assert ctx.get(dut.psum_out_0) == 2    # C[0][0]
-            assert ctx.get(dut.psum_out_1) == 6    # C[0][1]
-            ctx.set(dut.drain, 0)
+            assert ctx.get(dut.psum_out_0_0) == 2    # C[0][0]
+            assert ctx.get(dut.psum_out_0_1) == 6    # C[0][1]
+            assert ctx.get(dut.psum_out_1_0) == 6    # C[1][0]
+            assert ctx.get(dut.psum_out_1_1) == 12   # C[1][1]
 
         dut = OutputStationaryPEArray(2, 2)
         sim = Simulator(dut)
@@ -252,20 +222,19 @@ class TestOutputStationaryPEArray:
 
     def test_2x2_k_tiled_gemm(self):
         """
-        K-tiled GEMM on OS array. Same data as WS K-tiled test.
+        K-tiled GEMM on OS array with R×C direct readback.
           A = [[1, 2, 3, 4],    W = [[ 1, -1],
                [5, 6, 7, 8]]         [ 2,  0],
-                                      [-1,  3],
-                                      [ 0,  2]]
+                                       [-1,  3],
+                                       [ 0,  2]]
           A @ W = [[ 2, 16],
                    [10, 32]]
 
         2x2 OS array, K=2 per tile. Two K-tiles per pass, externally
-        accumulated. Unlike WS, OS processes all M-rows in one pass
-        but needs K-tiling when K > array size.
+        accumulated.
 
         K-tile 0: A[:,0:2] @ W[0:2,:]   K-tile 1: A[:,2:4] @ W[2:4,:]
-        External accum sums the two drain results per cell.
+        External accum sums the two readback results per cell.
         """
 
         async def testbench(ctx):
@@ -298,15 +267,10 @@ class TestOutputStationaryPEArray:
             await ctx.tick()
             await ctx.tick()
 
-            # Drain K-tile 0: bottom row (M=1) first, then top (M=0)
-            ctx.set(dut.drain, 1)
-            await ctx.delay(1e-7)
-            accum[1][0] += ctx.get(dut.psum_out_0)
-            accum[1][1] += ctx.get(dut.psum_out_1)
-            await ctx.tick()
-            accum[0][0] += ctx.get(dut.psum_out_0)
-            accum[0][1] += ctx.get(dut.psum_out_1)
-            ctx.set(dut.drain, 0)
+            # Read K-tile 0 results directly
+            for r in range(2):
+                for c in range(2):
+                    accum[r][c] += ctx.get(getattr(dut, f"psum_out_{r}_{c}"))
 
             # === K-tile 1: A[:,2:4] @ W[2:4,:] ===
             ctx.set(dut.psum_load, 1)
@@ -327,15 +291,10 @@ class TestOutputStationaryPEArray:
             await ctx.tick()
             await ctx.tick()
 
-            # Drain K-tile 1
-            ctx.set(dut.drain, 1)
-            await ctx.delay(1e-7)
-            accum[1][0] += ctx.get(dut.psum_out_0)
-            accum[1][1] += ctx.get(dut.psum_out_1)
-            await ctx.tick()
-            accum[0][0] += ctx.get(dut.psum_out_0)
-            accum[0][1] += ctx.get(dut.psum_out_1)
-            ctx.set(dut.drain, 0)
+            # Read K-tile 1 results directly
+            for r in range(2):
+                for c in range(2):
+                    accum[r][c] += ctx.get(getattr(dut, f"psum_out_{r}_{c}"))
 
             for r in range(2):
                 for c in range(2):
