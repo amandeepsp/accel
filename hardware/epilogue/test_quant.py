@@ -1,10 +1,38 @@
-"""SRDHM and RoundingDivideByPOT simulation tests."""
+import struct
 
 import pytest
 from amaranth.sim import Simulator
 
-from conftest import INT32_MIN, INT32_MAX, ref_srdhm, ref_rdbpot, to_signed32
-from quant import SRDHM
+from quant import SRDHM, RoundingDividebyPOT
+
+INT32_MIN = -(1 << 31)
+INT32_MAX = (1 << 31) - 1
+
+
+def to_signed32(val):
+    if val >= (1 << 31):
+        val -= 1 << 32
+    return val
+
+
+def ref_srdhm(a: int, b: int) -> int:
+    if a == INT32_MIN and b == INT32_MIN:
+        return INT32_MAX
+    ab = a * b
+    nudge = 1 << 30
+    result = (ab + nudge) >> 31
+    return max(INT32_MIN, min(INT32_MAX, result))
+
+
+def ref_rdbpot(x: int, exponent: int) -> int:
+    if exponent == 0:
+        return x
+    mask = (1 << exponent) - 1
+    remainder = x & mask
+    sign_bit = (x >> 31) & 1
+    threshold = (mask >> 1) + sign_bit
+    rounding = 1 if remainder > threshold else 0
+    return (x >> exponent) + rounding
 
 
 class TestSRDHM:
@@ -16,16 +44,15 @@ class TestSRDHM:
             ctx.set(dut.b, INT32_MIN)
             ctx.set(dut.start, 1)
             await ctx.tick()
-            # Saturation path: done=1 is latched on this edge
             assert ctx.get(dut.done) == 1
             result = to_signed32(ctx.get(dut.out))
-            assert result == INT32_MAX, f"expected {INT32_MAX}, got {result}"
+            assert result == INT32_MAX
 
         dut = SRDHM()
         sim = Simulator(dut)
         sim.add_clock(1e-6)
         sim.add_testbench(testbench)
-        with sim.write_vcd("test_srdhm_sat.vcd"):
+        with sim.write_vcd("waves/test_srdhm_sat.vcd"):
             sim.run()
 
     @pytest.mark.parametrize(
@@ -50,7 +77,6 @@ class TestSRDHM:
             ctx.set(dut.start, 1)
             await ctx.tick()
             ctx.set(dut.start, 0)
-            # Normal path: 2 cycles (stage0 → multiply, stage1 → extract+done)
             await ctx.tick()
             assert ctx.get(dut.done) == 1
             result = to_signed32(ctx.get(dut.out))
@@ -60,7 +86,7 @@ class TestSRDHM:
         sim = Simulator(dut)
         sim.add_clock(1e-6)
         sim.add_testbench(testbench)
-        with sim.write_vcd("test_srdhm.vcd"):
+        with sim.write_vcd("waves/test_srdhm.vcd"):
             sim.run()
 
     def test_zero(self):
@@ -72,27 +98,19 @@ class TestSRDHM:
             ctx.set(dut.start, 1)
             await ctx.tick()
             ctx.set(dut.start, 0)
-            # Normal path: 2 cycles
             await ctx.tick()
             assert ctx.get(dut.done) == 1
-            result = to_signed32(ctx.get(dut.out))
-            assert result == 0, f"expected 0, got {result}"
+            assert to_signed32(ctx.get(dut.out)) == 0
 
         dut = SRDHM()
         sim = Simulator(dut)
         sim.add_clock(1e-6)
         sim.add_testbench(testbench)
-        with sim.write_vcd("test_srdhm_zero.vcd"):
+        with sim.write_vcd("waves/test_srdhm_zero.vcd"):
             sim.run()
 
 
 class TestRDBPOT:
-    """RoundingDividebyPOT is purely combinational — no clock domain.
-
-    The Python reference is tested directly here. The hardware is tested
-    through the full CFU handshake in test_top.py::TestCfuTop.test_rdbpot_via_cfu.
-    """
-
     @pytest.mark.parametrize(
         "x, exponent, expected",
         [
@@ -100,16 +118,16 @@ class TestRDBPOT:
             (101, 2, 25),       # 101 / 4 = 25.25 → 25
             (102, 2, 26),       # 102 / 4 = 25.5  → 26
             (103, 2, 26),       # 103 / 4 = 25.75 → 26
-            (-100, 2, -25),     # -100 / 4 = -25
-            (-101, 2, -25),     # rounds toward zero
-            (-102, 2, -26),     # -102 / 4 = -25.5 → -26 (negative midpoint rounds away from zero)
-            (-103, 2, -26),     # -103 / 4 = -25.75 → -26
+            (-100, 2, -25),
+            (-101, 2, -25),
+            (-102, 2, -26),
+            (-103, 2, -26),
             (256, 8, 1),
             (255, 8, 1),
             (127, 8, 0),
             (0, 5, 0),
-            (1, 1, 1),         # 1 / 2 = 0.5 → 1
-            (-1, 1, -1),       # -1 / 2 = -0.5 → -1 (rounds away from zero)
+            (1, 1, 1),
+            (-1, 1, -1),
         ],
     )
     def test_reference(self, x, exponent, expected):

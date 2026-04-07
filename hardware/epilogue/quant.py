@@ -2,8 +2,8 @@ from amaranth import Elaboratable, Module, Mux, Signal, signed
 
 from cfu import Instruction
 
-INT32_MIN = -(1 << 31)       # -2147483648
-INT32_MAX = (1 << 31) - 1   #  2147483647
+INT32_MIN = -(1 << 31)
+INT32_MAX = (1 << 31) - 1
 
 
 class SRDHM(Elaboratable):

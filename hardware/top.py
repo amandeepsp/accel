@@ -1,28 +1,20 @@
-"""CFU top-level: single MAC4 instruction at funct3=0."""
+"""CFU top-level with CPU-sequencer local stores."""
 
-from amaranth import ClockSignal, ResetSignal
+from amaranth import ClockSignal, ResetSignal, Signal
 from amaranth.back.verilog import convert
+from amaranth.lib.memory import Memory
 from cfu import Cfu
-from mac import SimdMac4
-from quant import RoundingDividebyPOTInstruction, SRDHMInstruction
-from rw import ReadRegs, WriteRegs
+from epilogue.quant import RoundingDividebyPOTInstruction, SRDHMInstruction
 
 
 class Top(Cfu):
+    STORE_DEPTH = 512
+
     def elab_instructions(self, m):
-        m.submodules["mac4"] = mac4 = SimdMac4()
-        m.submodules["read"] = read = ReadRegs()
-        m.submodules["write"] = write = WriteRegs()
         m.submodules["srdhm"] = srdhm = SRDHMInstruction()
         m.submodules["rdpot"] = rdpot = RoundingDividebyPOTInstruction()
 
-        m.d.comb += [
-            read.input_offset.eq(write.input_offset),
-            read.accumulator.eq(mac4.accumulator),
-            mac4.reset_acc.eq(write.reset_acc),
-            mac4.input_offset.eq(write.input_offset),
-        ]
-        return {0: mac4, 1: read, 2: write, 3: srdhm, 4: rdpot}
+        return {3: srdhm, 4: rdpot}
 
 
 if __name__ == "__main__":

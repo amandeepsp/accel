@@ -1,17 +1,17 @@
 from amaranth import (
     Array,
     ClockDomain,
-    ClockSignal,
     Elaboratable,
     Module,
-    ResetSignal,
     Signal,
     signed,
 )
 from amaranth.build import Platform
+from amaranth.lib import data, wiring
+from amaranth.lib.wiring import In, Out
 
 
-class Instruction(Elaboratable):
+class Instruction(wiring.Component):
     """
     Custom instruction.
     This encodes a 32-bit R-type instruction with:
@@ -32,22 +32,21 @@ class Instruction(Elaboratable):
                                                      CUSTOM_0
     """
 
-    def __init__(self) -> None:
-        self.in0 = Signal(32)
-        self.in1 = Signal(32)
-        self.funct7 = Signal(7)
-        self.funct3 = Signal(3)
-        self.output = Signal(32)
-        self.start = Signal()
-        self.done = Signal()
-        self.in0s = Signal(signed(32))
-        self.in1s = Signal(signed(32))
+    in0: In(32)
+    in1: In(32)
+    funct7: In(7)
+    funct3: In(3)
+    output: Out(32)
+    start: In(1)
+    done: Out(1)
 
     def signal_done(self, m):
         m.d.comb += self.done.eq(1)
 
     def elaborate(self, platform: Platform):
         m = Module()
+        self.in0s = Signal(signed(32))
+        self.in1s = Signal(signed(32))
         m.d.comb += [self.in0s.eq(self.in0), self.in1s.eq(self.in1)]
         return m
 
@@ -65,6 +64,9 @@ class _FallbackInstruction(Instruction):
         return m
 
 
+FunctionIdLayout = data.StructLayout({"funct3": 3, "funct7": 7})
+
+
 class Cfu(Elaboratable):
     """
     Custom Function Unit
@@ -77,8 +79,8 @@ class Cfu(Elaboratable):
         self.cmd_valid = Signal(name="cmd_valid")
         self.cmd_ready = Signal(name="cmd_ready")
         self.cmd_function_id = Signal(
-            10, name="cmd_payload_function_id"
-        )  # funct3 + funct7
+            FunctionIdLayout, name="cmd_payload_function_id"
+        )
         self.cmd_in0 = Signal(32, name="cmd_payload_inputs_0")
         self.cmd_in1 = Signal(32, name="cmd_payload_inputs_1")
         self.rsp_valid = Signal(name="rsp_valid")
@@ -93,7 +95,7 @@ class Cfu(Elaboratable):
             [
                 self.cmd_valid,
                 self.cmd_ready,
-                self.cmd_function_id,
+                self.cmd_function_id.as_value(),
                 self.cmd_in0,
                 self.cmd_in1,
                 self.rsp_valid,
@@ -166,12 +168,8 @@ class Cfu(Elaboratable):
         cd.rst = self.reset
         m.domains += cd
         # Internal Wiring
-        funct3 = Signal(3)
-        funct7 = Signal(7)
-        m.d.comb += [
-            funct3.eq(self.cmd_function_id[:3]),
-            funct7.eq(self.cmd_function_id[-7:]),
-        ]
+        funct3 = self.cmd_function_id.funct3
+        funct7 = self.cmd_function_id.funct7
         stored_function_id = Signal(3)
         current_function_id = Signal(3)
         current_function_done = Signal()
@@ -214,7 +212,7 @@ class Cfu(Elaboratable):
                 )
                 m.d.comb += self.cmd_ready.eq(1)
                 with m.If(self.cmd_valid):
-                    m.d.sync += stored_function_id.eq(self.cmd_function_id[:3])
+                    m.d.sync += stored_function_id.eq(funct3)
                     m.d.comb += instruction_starts[current_function_id].eq(1)
                     # Fast path: check if instruction completes this cycle (single-cycle instructions).
                     # If done, send result immediately or buffer it. If not done, move to WAIT_INSTRUCTION.

@@ -18,13 +18,14 @@ dependencies = [
     "litescope>=2024.12",
     "pyserial",
     "litespi>=2024.12",
-    "crc16>=0.1.1",
-    "numpy>=2.2.6",
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["hardware"]
-pythonpath = ["hardware"]
+testpaths = ["hardware", "hardware/systolic", "hardware/memory", "hardware/epilogue"]
+pythonpath = ["hardware", "hardware/systolic", "hardware/memory", "hardware/epilogue"]
+
+[tool.ty.src]
+root = "hardware"
 
 [tool.uv.sources]
 litex = { path = "../litex/litex", editable = true }
