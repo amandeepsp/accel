@@ -10,35 +10,49 @@ pub const Header = protocol.RequestHeader;
 
 pub const LinkError = error{ BadMagic, Timeout };
 
-pub fn recv_header() LinkError!protocol.RequestHeader {
+pub fn recvHeader() LinkError!protocol.RequestHeader {
     // Sync: skip bytes until we find the magic request byte.
     while (true) {
-        const b = uart.read_byte_blocking();
+        const b = uart.readByte();
         if (b == MAGIC_REQ) break;
     }
     // Read remaining 7 bytes of the header.
     var header: protocol.RequestHeader = undefined;
     const buf: []u8 = std.mem.asBytes(&header);
     buf[0] = MAGIC_REQ;
-    uart.read_bytes(buf[1..]);
+    uart.readBytes(buf[1..]);
     return header;
 }
 
-pub fn send_response(seq_id: u16, status: StatusCode, data: []const u8, cycles: u16) void {
+pub fn sendResponse(seq_id: u16, status: StatusCode, data: []const u8, cycles: u16) void {
+    sendResponseHeader(seq_id, status, @intCast(data.len), cycles);
+    uart.writeBytes(data);
+}
+
+pub fn sendResponseHeader(seq_id: u16, status: StatusCode, payload_len: u16, cycles: u16) void {
     const rsp = protocol.ResponseHeader{
         .status = status,
-        .payload_len = @intCast(data.len),
+        .payload_len = payload_len,
         .seq_id = seq_id,
         .cycles_lo = cycles,
     };
-    uart.write_bytes(std.mem.asBytes(&rsp));
-    uart.write_bytes(data);
+    uart.writeBytes(std.mem.asBytes(&rsp));
 }
 
-pub fn send_ok(seq_id: u16, data: []const u8, cycles: u16) void {
-    send_response(seq_id, .ok, data, cycles);
+pub fn sendOk(seq_id: u16, data: []const u8, cycles: u16) void {
+    sendResponse(seq_id, .ok, data, cycles);
 }
 
-pub fn send_error(seq_id: u16, code: StatusCode) void {
-    send_response(seq_id, code, &.{}, 0);
+pub fn sendError(seq_id: u16, code: StatusCode) void {
+    sendResponse(seq_id, code, &.{}, 0);
+}
+
+pub fn drainPayload(len: usize) void {
+    var remaining = len;
+    var buf: [64]u8 = undefined;
+    while (remaining > 0) {
+        const chunk_len = @min(remaining, buf.len);
+        uart.readBytes(buf[0..chunk_len]);
+        remaining -= chunk_len;
+    }
 }

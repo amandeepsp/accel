@@ -15,28 +15,28 @@ pub fn init() void {
     ev_enable.write(0x3); // UART_EV_TX | UART_EV_RX
 }
 
-pub fn write_byte(b: u8) void {
+pub fn writeByte(b: u8) void {
     while (txfull.read() != 0) {}
     rxtx.write(b);
 }
 
-pub fn read_byte_blocking() u8 {
+pub fn readByte() u8 {
     while (rxempty.read() != 0) {}
     const b: u8 = @truncate(rxtx.read());
     ev_pending.write(0x2); // ack UART_EV_RX
     return b;
 }
 
-pub fn write_bytes(buf: []const u8) void {
-    for (buf) |b| write_byte(b);
+pub fn writeBytes(buf: []const u8) void {
+    for (buf) |b| writeByte(b);
 }
 
-pub fn read_bytes(buf: []u8) void {
-    for (buf) |*b| b.* = read_byte_blocking();
+pub fn readBytes(buf: []u8) void {
+    for (buf) |*b| b.* = readByte();
 }
 
 /// Drain any stale bytes from the RX FIFO.
-pub fn drain_rx() void {
+pub fn drainRx() void {
     while (rxempty.read() == 0) {
         _ = rxtx.read();
         ev_pending.write(0x2);

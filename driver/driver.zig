@@ -10,6 +10,7 @@ pub const AccelError = error{
     BadMagic,
     UnknownOp,
     BadPayloadLen,
+    BadAddress,
     IllegalInstruction,
     TrapFault,
     DeviceError,
@@ -27,98 +28,74 @@ pub const Driver = struct {
             .baud_rate = baud_rate,
             .word_size = .eight,
         });
-
         try serial.flushSerialPort(port, .both);
 
-        return .{
-            .port = port,
-        };
+        return .{ .port = port };
     }
 
     pub fn deinit(self: *Driver) void {
         self.port.close();
     }
 
-    fn issue(
-        self: *Driver,
-        comptime op: protocol.OpType,
-        req: protocol.ReqType(op),
-        resp: *protocol.RespType(op),
-    ) !void {
-        const payload_len = @sizeOf(protocol.ReqType(op));
-        if (payload_len > std.math.maxInt(u16)) return error.PayloadTooLarge;
-
-        const header = protocol.RequestHeader.init(op, payload_len, 0);
-        try self.port.writeAll(header.as_bytes());
-        std.debug.print(">> req header = {}\n", .{header});
-        if (payload_len > 0) {
-            try self.port.writeAll(std.mem.asBytes(&req));
-            std.debug.print(">> req payload = {}\n", .{req});
+    fn drainBytes(self: *Driver, len: usize) !void {
+        var remaining = len;
+        var buf: [256]u8 = undefined;
+        while (remaining > 0) {
+            const chunk_len = @min(remaining, buf.len);
+            const read_len = try self.port.readAll(buf[0..chunk_len]);
+            if (read_len != chunk_len) return error.BadResponse;
+            remaining -= chunk_len;
         }
+    }
+
+    fn issuePayload(
+        self: *Driver,
+        op: protocol.OpType,
+        payload: []const u8,
+        response: []u8,
+    ) !void {
+        if (payload.len > std.math.maxInt(u16)) return error.PayloadTooLarge;
+
+        const header = protocol.RequestHeader.init(op, @intCast(payload.len), 0);
+        try self.port.writeAll(header.as_bytes());
+        try self.port.writeAll(payload);
 
         var resp_header_buf: [@sizeOf(protocol.ResponseHeader)]u8 = undefined;
         const read_len = try self.port.readAll(&resp_header_buf);
-        if (read_len < @sizeOf(protocol.ResponseHeader)) {
-            return error.BadResponse;
-        }
+        if (read_len != resp_header_buf.len) return error.BadResponse;
 
         const resp_header = protocol.ResponseHeader.from_bytes(&resp_header_buf);
-        std.debug.print("<< resp header = {}\n", .{resp_header});
-        if (resp_header.magic != protocol.MAGIC_RESP) {
-            return error.BadMagic;
-        }
+        if (resp_header.magic != protocol.MAGIC_RESP) return error.BadMagic;
 
-        // Check status code from firmware.
         if (!resp_header.status.isOk()) {
             log.err("device returned error: {s} (0x{X:0>2})", .{
                 resp_header.status.describe(),
                 @intFromEnum(resp_header.status),
             });
-            // Drain any error payload the firmware sent.
             if (resp_header.payload_len > 0) {
-                var drain_buf: [256]u8 = undefined;
-                const drain_len = @min(resp_header.payload_len, drain_buf.len);
-                _ = try self.port.readAll(drain_buf[0..drain_len]);
+                try self.drainBytes(resp_header.payload_len);
             }
             return statusToError(resp_header.status);
         }
 
         self.last_cycles = resp_header.cycles_lo;
 
-        const resp_bytes = std.mem.asBytes(resp);
-        if (resp_bytes.len > 0 and resp_header.payload_len > 0) {
-            const read_payload_len = try self.port.readAll(resp_bytes);
-            if (read_payload_len < resp_bytes.len) {
-                return error.BadResponse;
+        if (resp_header.payload_len != response.len) {
+            if (resp_header.payload_len > 0) {
+                try self.drainBytes(resp_header.payload_len);
             }
-
-            std.debug.print("<< resp payload = {}\n", .{resp});
+            return error.BadResponse;
         }
 
-        std.debug.print(":: took {} cycles\n", .{resp_header.cycles_lo});
+        if (response.len > 0) {
+            const read_payload_len = try self.port.readAll(response);
+            if (read_payload_len != response.len) return error.BadResponse;
+        }
     }
 
     pub fn ping(self: *Driver) !void {
-        var resp: protocol.Ping.Resp = undefined;
-        try self.issue(.ping, .{}, &resp);
-    }
-
-    pub fn mac4(self: *Driver, as: [4]i8, bs: [4]i8) !i32 {
-        var resp: protocol.Mac4.Resp = undefined;
-        try self.issue(.mac4, protocol.Mac4.Req{ .as = as, .bs = bs }, &resp);
-        return resp.result;
-    }
-
-    pub fn srdhm(self: *Driver, a: i32, b: i32) !i32 {
-        var resp: protocol.Srdhm.Resp = undefined;
-        try self.issue(.srdhm, protocol.Srdhm.Req{ .a = a, .b = b }, &resp);
-        return resp.result;
-    }
-
-    pub fn rdbpot(self: *Driver, x: i32, exponent: i32) !i32 {
-        var resp: protocol.Rdbpot.Resp = undefined;
-        try self.issue(.rdbpot, protocol.Rdbpot.Req{ .x = x, .exponent = exponent }, &resp);
-        return resp.result;
+        var response: [0]u8 = .{};
+        try self.issuePayload(.ping, &.{}, response[0..]);
     }
 };
 
@@ -127,6 +104,7 @@ fn statusToError(status: protocol.StatusCode) AccelError {
         .ok => unreachable,
         .unknown_op => error.UnknownOp,
         .bad_payload_len => error.BadPayloadLen,
+        .bad_address => error.BadAddress,
         .bad_magic => error.BadMagic,
         .timeout => error.DeviceError,
         .illegal_instruction => error.IllegalInstruction,

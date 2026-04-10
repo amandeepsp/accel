@@ -1,32 +1,31 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
-    // ── Shared protocol module (used by both firmware and host) ──────
     const protocol = b.createModule(.{
         .root_source_file = b.path("shared/protocol.zig"),
     });
 
-    // ── Driver (native target) ────────────────────────────────────
     const drv_target = b.standardTargetOptions(.{});
     const drv_optimize = b.standardOptimizeOption(.{});
-
-    const drv_lib = b.addLibrary(.{
-        .name = "driver",
-        .linkage = .static,
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("driver/driver.zig"),
-            .target = drv_target,
-            .optimize = drv_optimize,
-        }),
-    });
 
     const serial_dep = b.dependency("serial", .{
         .target = drv_target,
         .optimize = drv_optimize,
     });
-    drv_lib.root_module.addImport("serial", serial_dep.module("serial"));
 
-    drv_lib.root_module.addImport("protocol", protocol);
+    const driver_mod = b.createModule(.{
+        .root_source_file = b.path("driver/driver.zig"),
+        .target = drv_target,
+        .optimize = drv_optimize,
+    });
+    driver_mod.addImport("serial", serial_dep.module("serial"));
+    driver_mod.addImport("protocol", protocol);
+
+    const drv_lib = b.addLibrary(.{
+        .name = "driver",
+        .linkage = .static,
+        .root_module = driver_mod,
+    });
 
     const drv_exe = b.addExecutable(.{
         .name = "driver",
@@ -37,8 +36,23 @@ pub fn build(b: *std.Build) void {
         }),
     });
     drv_exe.root_module.linkLibrary(drv_lib);
-    drv_exe.root_module.addImport("driver", drv_lib.root_module);
+    drv_exe.root_module.addImport("driver", driver_mod);
     b.installArtifact(drv_exe);
+
+    const drv_c_api_mod = b.createModule(.{
+        .root_source_file = b.path("driver/c_api.zig"),
+        .target = drv_target,
+        .optimize = drv_optimize,
+    });
+    drv_c_api_mod.addImport("driver", driver_mod);
+
+    const drv_c_api_lib = b.addLibrary(.{
+        .name = "libaccel",
+        .linkage = .dynamic,
+        .root_module = drv_c_api_mod,
+    });
+
+    _ = b.addInstallArtifact(drv_c_api_lib, .{});
 
     const run_drv = b.addRunArtifact(drv_exe);
     run_drv.step.dependOn(b.getInstallStep());
@@ -47,14 +61,12 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the driver");
     run_step.dependOn(&run_drv.step);
 
-    // ── Driver tests ────────────────────────────────────────────────
-    const drv_tests = b.addTest(.{ .root_module = drv_lib.root_module });
+    const drv_tests = b.addTest(.{ .root_module = driver_mod });
     const run_drv_tests = b.addRunArtifact(drv_tests);
 
     const test_step = b.step("test", "Run driver tests");
     test_step.dependOn(&run_drv_tests.step);
 
-    // ── Firmware (RISC-V freestanding target, always ReleaseSmall) ──
     const fw_query: std.Target.Query = .{
         .cpu_arch = .riscv32,
         .os_tag = .freestanding,
@@ -119,11 +131,6 @@ pub fn build(b: *std.Build) void {
     });
     fw_mod.addImport("csr", csr_options.createModule());
     fw_mod.addImport("protocol", protocol);
-    fw_mod.addImport("cfu", b.createModule(.{
-        .root_source_file = b.path("shared/cfu.zig"),
-        .target = fw_target,
-        .optimize = .ReleaseSmall,
-    }));
 
     const fw_exe = b.addExecutable(.{
         .name = "firmware",
@@ -151,19 +158,4 @@ pub fn build(b: *std.Build) void {
     const fw_step = b.step("firmware", "Build firmware only");
     fw_step.dependOn(&install_bin.step);
     fw_step.dependOn(&install_elf.step);
-
-    // ── Simulation (Renode + Verilated CFU) ────────────────────────
-    const renode = b.findProgram(&.{"renode"}, &.{"/opt/renode"}) catch
-        @panic("renode not found in PATH");
-    const sim_cmd = b.addSystemCommand(&.{
-        renode,
-        "--disable-xwt",
-        "--console",
-        "-e",
-        "include @sim/accel.resc; start",
-    });
-    sim_cmd.step.dependOn(&fw_exe.step);
-
-    const sim_step = b.step("sim", "Run Renode simulation");
-    sim_step.dependOn(&sim_cmd.step);
 }

@@ -2,17 +2,14 @@
 ///
 /// All structs are `extern` so the layout is fixed and matches
 /// what goes over the UART byte-for-byte.
-const std = @import("std");
-
 pub const MAGIC_REQ: u8 = 0xCF;
 pub const MAGIC_RESP: u8 = 0xFC;
 
 pub const OpType = enum(u8) {
-    ping = 0x0,
-    mac4 = 0x1,
-    srdhm = 0x2,
-    rdbpot = 0x3,
-    mma = 0x4,
+    ping = 0x00,
+    read = 0x10,
+    write = 0x11,
+    exec = 0x12,
     _,
 };
 
@@ -23,6 +20,7 @@ pub const StatusCode = enum(u8) {
     ok = 0x00,
     unknown_op = 0x01,
     bad_payload_len = 0x02,
+    bad_address = 0x03,
     bad_magic = 0xE0,
     timeout = 0xE1,
     illegal_instruction = 0xF0,
@@ -37,6 +35,7 @@ pub const StatusCode = enum(u8) {
             .ok => "ok",
             .unknown_op => "unknown opcode",
             .bad_payload_len => "payload length mismatch",
+            .bad_address => "address out of range",
             .bad_magic => "bad magic byte",
             .timeout => "timeout",
             .illegal_instruction => "illegal instruction trap",
@@ -84,129 +83,15 @@ pub const ResponseHeader = extern struct {
     }
 };
 
-pub const Ping = struct {
-    pub const Req = extern struct {};
-    pub const Resp = extern struct {};
-};
-
-pub const Mac4 = struct {
-    pub const Req = extern struct {
-        as: [4]i8,
-        bs: [4]i8,
-    };
-    pub const Resp = extern struct {
-        result: i32,
-    };
-};
-
-pub const Srdhm = struct {
-    pub const Req = extern struct {
-        a: i32,
-        b: i32,
-    };
-    pub const Resp = extern struct {
-        result: i32,
-    };
-};
-
-pub const Rdbpot = struct {
-    pub const Req = extern struct {
-        x: i32,
-        exponent: i32,
-    };
-    pub const Resp = extern struct {
-        result: i32,
-    };
-};
-
-pub const Mma = struct {
-    pub const store_depth_words: usize = 512;
-    // The current firmware keeps one accumulator row in SRAM while it drives
-    // mac4_next. Leave two i32 slots of headroom for the rest of .bss.
-    pub const max_n: usize = store_depth_words * 4 - 2;
-
-    /// One partial-GEMM row update using the current CPU-as-sequencer engine.
-    ///
-    /// Payload layout:
-    /// - ReqHeader
-    /// - packed lhs row: k_words x i32
-    /// - packed rhs tile in filter-stream order: (n * k_words) x i32
-    /// - accumulator row: n x i32
-    ///
-    /// Response payload:
-    /// - updated accumulator row: n x i32
+pub const WriteMem = struct {
     pub const ReqHeader = extern struct {
-        n: u16,
-        k: u16,
-        input_offset: i32,
+        addr: u32,
     };
-
-    pub fn kWords(k: u16) usize {
-        return (@as(usize, k) + 3) / 4;
-    }
-
-    pub fn lhsWords(req: ReqHeader) usize {
-        return kWords(req.k);
-    }
-
-    pub fn rhsWords(req: ReqHeader) usize {
-        return lhsWords(req) * @as(usize, req.n);
-    }
-
-    pub fn accumWords(req: ReqHeader) usize {
-        return @as(usize, req.n);
-    }
-
-    pub fn payloadBytes(req: ReqHeader) usize {
-        return @sizeOf(ReqHeader) +
-            @sizeOf(i32) * (lhsWords(req) + rhsWords(req) + accumWords(req));
-    }
-
-    pub fn responseBytes(req: ReqHeader) usize {
-        return @sizeOf(i32) * accumWords(req);
-    }
-
-    pub fn fitsCurrentEngine(req: ReqHeader) bool {
-        if (req.n == 0 or req.k == 0) return false;
-        if (req.n > max_n) return false;
-
-        const k_words = lhsWords(req);
-        return k_words <= store_depth_words and rhsWords(req) <= store_depth_words;
-    }
-
-    pub fn checkedPayloadBytes(req: ReqHeader) ?u16 {
-        if (!fitsCurrentEngine(req)) return null;
-
-        const payload_len = payloadBytes(req);
-        if (payload_len > std.math.maxInt(u16)) return null;
-        return @intCast(payload_len);
-    }
-
-    pub fn checkedResponseBytes(req: ReqHeader) ?u16 {
-        if (!fitsCurrentEngine(req)) return null;
-
-        const payload_len = responseBytes(req);
-        if (payload_len > std.math.maxInt(u16)) return null;
-        return @intCast(payload_len);
-    }
 };
 
-pub fn ReqType(comptime op: OpType) type {
-    return switch (op) {
-        .ping => Ping.Req,
-        .mac4 => Mac4.Req,
-        .srdhm => Srdhm.Req,
-        .rdbpot => Rdbpot.Req,
-        else => @compileError("unknown op type"),
+pub const ReadMem = struct {
+    pub const Req = extern struct {
+        addr: u32,
+        len: u32,
     };
-}
-
-pub fn RespType(comptime op: OpType) type {
-    return switch (op) {
-        .ping => Ping.Resp,
-        .mac4 => Mac4.Resp,
-        .srdhm => Srdhm.Resp,
-        .rdbpot => Rdbpot.Resp,
-        else => @compileError("unknown op type"),
-    };
-}
+};
