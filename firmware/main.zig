@@ -1,16 +1,7 @@
 const uart = @import("uart.zig");
 const link = @import("link.zig");
 const dispatch = @import("dispatch.zig");
-const mmio = @import("mmio.zig");
-const timer = @import("timer.zig");
-
-/// VexRiscv CfuPlugin enable register (CSR 0xBC0, bit 31).
-const cfu_ctrl = mmio.Csr(0xBC0);
-
-/// RISC-V trap CSRs.
-const mcause = mmio.Csr(0x342);
-const mtval = mmio.Csr(0x343);
-const mepc = mmio.Csr(0x341);
+const cpu_csr = @import("cpu_csr.zig");
 
 /// RISC-V mcause exception codes.
 const CAUSE_ILLEGAL_INSTRUCTION = 2;
@@ -23,8 +14,7 @@ var current_seq_id: u16 = 0;
 
 /// Entry point — called from LiteX crt0.S after hardware init.
 export fn main() void {
-    cfu_ctrl.write(0x80000000);
-    timer.init();
+    cpu_csr.cfu_ctrl.write(0x80000000);
     uart.init();
     uart.drainRx();
     uart.writeBytes("[link] ready\n");
@@ -50,7 +40,7 @@ export fn main() void {
 ///   - For illegal instructions, report via protocol and advance mepc
 ///   - For other traps, report a generic trap fault
 export fn isr() void {
-    const cause = mcause.read();
+    const cause = cpu_csr.mcause.read();
 
     // Bit 31 set means it's an interrupt, not an exception.
     if (cause & 0x80000000 != 0) {
@@ -64,25 +54,25 @@ export fn isr() void {
         CAUSE_ILLEGAL_INSTRUCTION => {
             // Send the faulting instruction word as the error payload
             // so the host can decode what went wrong.
-            const faulting_insn = mtval.read();
+            const faulting_insn = cpu_csr.mtval.read();
             const insn_bytes = @as([4]u8, @bitCast(faulting_insn));
             link.sendResponse(current_seq_id, .illegal_instruction, &insn_bytes, 0);
 
             // Advance past the faulting instruction so we don't loop.
             // All our instructions are 32-bit (C extension disabled).
-            mepc.write(mepc.read() + 4);
+            cpu_csr.mepc.write(cpu_csr.mepc.read() + 4);
         },
         CAUSE_LOAD_ACCESS_FAULT, CAUSE_STORE_ACCESS_FAULT => {
-            const fault_addr = mtval.read();
+            const fault_addr = cpu_csr.mtval.read();
             const addr_bytes = @as([4]u8, @bitCast(fault_addr));
             link.sendResponse(current_seq_id, .trap_fault, &addr_bytes, 0);
-            mepc.write(mepc.read() + 4);
+            cpu_csr.mepc.write(cpu_csr.mepc.read() + 4);
         },
         else => {
             // Unknown exception — send cause code as payload.
             const cause_bytes = @as([4]u8, @bitCast(cause));
             link.sendResponse(current_seq_id, .trap_fault, &cause_bytes, 0);
-            mepc.write(mepc.read() + 4);
+            cpu_csr.mepc.write(cpu_csr.mepc.read() + 4);
         },
     }
 }

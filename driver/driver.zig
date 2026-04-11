@@ -48,17 +48,20 @@ pub const Driver = struct {
         }
     }
 
-    fn issuePayload(
+    fn issuePayloadParts(
         self: *Driver,
         op: protocol.OpType,
-        payload: []const u8,
+        payload_a: []const u8,
+        payload_b: []const u8,
         response: []u8,
     ) !void {
-        if (payload.len > std.math.maxInt(u16)) return error.PayloadTooLarge;
+        const payload_len = payload_a.len + payload_b.len;
+        if (payload_len > std.math.maxInt(u16)) return error.PayloadTooLarge;
 
-        const header = protocol.RequestHeader.init(op, @intCast(payload.len), 0);
+        const header = protocol.RequestHeader.init(op, @intCast(payload_len), 0);
         try self.port.writeAll(header.as_bytes());
-        try self.port.writeAll(payload);
+        try self.port.writeAll(payload_a);
+        try self.port.writeAll(payload_b);
 
         var resp_header_buf: [@sizeOf(protocol.ResponseHeader)]u8 = undefined;
         const read_len = try self.port.readAll(&resp_header_buf);
@@ -93,9 +96,59 @@ pub const Driver = struct {
         }
     }
 
+    fn issuePayload(
+        self: *Driver,
+        op: protocol.OpType,
+        payload: []const u8,
+        response: []u8,
+    ) !void {
+        try self.issuePayloadParts(op, payload, &.{}, response);
+    }
+
     pub fn ping(self: *Driver) !void {
         var response: [0]u8 = .{};
         try self.issuePayload(.ping, &.{}, response[0..]);
+    }
+
+    pub fn writeMem(self: *Driver, addr: u32, data: []const u8) !void {
+        const chunk_max = std.math.maxInt(u16) - @sizeOf(protocol.WriteMem.ReqHeader);
+        var offset: usize = 0;
+
+        while (offset < data.len) {
+            const chunk_len = @min(chunk_max, data.len - offset);
+            const req = protocol.WriteMem.ReqHeader{
+                .addr = addr + @as(u32, @intCast(offset)),
+            };
+            var response: [0]u8 = .{};
+            try self.issuePayloadParts(
+                .write,
+                std.mem.asBytes(&req),
+                data[offset .. offset + chunk_len],
+                response[0..],
+            );
+            offset += chunk_len;
+        }
+    }
+
+    pub fn readMem(self: *Driver, addr: u32, buf: []u8) !void {
+        const chunk_max = std.math.maxInt(u16);
+        var offset: usize = 0;
+
+        while (offset < buf.len) {
+            const chunk_len = @min(chunk_max, buf.len - offset);
+            const req = protocol.ReadMem.Req{
+                .addr = addr + @as(u32, @intCast(offset)),
+                .len = @intCast(chunk_len),
+            };
+            try self.issuePayload(.read, std.mem.asBytes(&req), buf[offset .. offset + chunk_len]);
+            offset += chunk_len;
+        }
+    }
+
+    pub fn exec(self: *Driver, program: []const u8) !u32 {
+        var response: [4]u8 = undefined;
+        try self.issuePayload(.exec, program, &response);
+        return std.mem.readInt(u32, &response, .little);
     }
 };
 

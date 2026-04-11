@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "accel"
 version = "0.1.0"
@@ -19,6 +23,14 @@ dependencies = [
     "pyserial",
     "litespi>=2024.12",
 ]
+
+[project.scripts]
+litex-upload-once = "tools.litex_upload_once:main"
+accel-e2e-gemm = "tools.e2e_gemm:main"
+
+[tool.setuptools.packages.find]
+include = ["tools*"]
+namespaces = true
 
 [tool.pytest.ini_options]
 testpaths = ["hardware", "hardware/systolic", "hardware/memory", "hardware/epilogue"]

@@ -10,6 +10,7 @@ firmware/crt0.o
 __pycache__/
 *.pyc
 .venv/
+*.egg-info
 
 # Editor
 *.swp

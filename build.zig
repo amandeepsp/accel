@@ -4,9 +4,31 @@ pub fn build(b: *std.Build) void {
     const protocol = b.createModule(.{
         .root_source_file = b.path("shared/protocol.zig"),
     });
+    const ir = b.createModule(.{
+        .root_source_file = b.path("shared/ir.zig"),
+    });
 
     const drv_target = b.standardTargetOptions(.{});
     const drv_optimize = b.standardOptimizeOption(.{});
+    const cfu_rows = b.option(
+        usize,
+        "cfu-rows",
+        "CFU array row count (default: 8)",
+    ) orelse 8;
+    const cfu_cols = b.option(
+        usize,
+        "cfu-cols",
+        "CFU array column count (default: 8)",
+    ) orelse 8;
+    const cfu_store_depth = b.option(
+        usize,
+        "cfu-store-depth",
+        "CFU scratchpad depth in words (default: 512)",
+    ) orelse 512;
+    const accel_config = b.addOptions();
+    accel_config.addOption(usize, "cfu_rows", cfu_rows);
+    accel_config.addOption(usize, "cfu_cols", cfu_cols);
+    accel_config.addOption(usize, "cfu_store_depth", cfu_store_depth);
 
     const serial_dep = b.dependency("serial", .{
         .target = drv_target,
@@ -20,6 +42,8 @@ pub fn build(b: *std.Build) void {
     });
     driver_mod.addImport("serial", serial_dep.module("serial"));
     driver_mod.addImport("protocol", protocol);
+    driver_mod.addImport("ir", ir);
+    driver_mod.addImport("accel_config", accel_config.createModule());
 
     const drv_lib = b.addLibrary(.{
         .name = "driver",
@@ -37,6 +61,8 @@ pub fn build(b: *std.Build) void {
     });
     drv_exe.root_module.linkLibrary(drv_lib);
     drv_exe.root_module.addImport("driver", driver_mod);
+    drv_exe.root_module.addImport("ir", ir);
+    drv_exe.root_module.addImport("accel_config", accel_config.createModule());
     b.installArtifact(drv_exe);
 
     const drv_c_api_mod = b.createModule(.{
@@ -131,6 +157,8 @@ pub fn build(b: *std.Build) void {
     });
     fw_mod.addImport("csr", csr_options.createModule());
     fw_mod.addImport("protocol", protocol);
+    fw_mod.addImport("ir", ir);
+    fw_mod.addImport("fw_config", accel_config.createModule());
 
     const fw_exe = b.addExecutable(.{
         .name = "firmware",
