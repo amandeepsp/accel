@@ -50,7 +50,7 @@ const StreamContext = struct {
     }
 
     fn readInstruction(self: *StreamContext, comptime T: type, opcode: ir.InstructionType) ExecError!T {
-        if (self.remaining + 1 < @sizeOf(T)) return error.BadPayloadLen;
+        if (self.remaining < @sizeOf(T) - 1) return error.BadPayloadLen;
 
         var value: T = undefined;
         const bytes = std.mem.asBytes(&value);
@@ -70,14 +70,32 @@ const StreamContext = struct {
     }
 };
 
-pub fn execute(payload_len: u16) ExecError!u32 {
+pub fn execute(payload_len: u16, debug_buf: []u8) ExecError!u32 {
     var ctx = StreamContext.init(payload_len);
     errdefer ctx.drainRemaining();
 
     const header = try ctx.read(ir.ProgramHeader);
-    if (header.magic != ir.program_magic) return error.BadMagic;
-    if (header.version != ir.program_version) return error.BadPayloadLen;
-    if (header.num_tensors > max_tensors) return error.BadPayloadLen;
+    if (header.magic != ir.program_magic) {
+        debug_buf[0] = @intCast(payload_len);
+        debug_buf[1] = @intCast(ctx.remaining);
+        debug_buf[2] = @truncate(header.magic >> 24);
+        debug_buf[3] = @intCast(header.version);
+        return error.BadMagic;
+    }
+    if (header.version != ir.program_version) {
+        debug_buf[0] = @intCast(payload_len);
+        debug_buf[1] = @intCast(ctx.remaining);
+        debug_buf[2] = @intCast(header.version);
+        debug_buf[3] = @truncate(header.magic >> 24);
+        return error.BadPayloadLen;
+    }
+    if (header.num_tensors > max_tensors) {
+        debug_buf[0] = @intCast(payload_len);
+        debug_buf[1] = @intCast(ctx.remaining);
+        debug_buf[2] = header.num_tensors;
+        debug_buf[3] = @intCast(header.version);
+        return error.BadPayloadLen;
+    }
 
     var descs: [max_tensors]ir.TensorDescriptor = undefined;
     for (descs[0..header.num_tensors]) |*desc| {
@@ -89,9 +107,17 @@ pub fn execute(payload_len: u16) ExecError!u32 {
 
     const cycle_start = cpu_csr.mcycle.read();
     var saw_done = false;
+    var instr_idx: u8 = 0;
 
     for (0..header.num_instructions) |_| {
         const opcode = try ctx.readOpcode();
+        debug_buf[0] = @intCast(payload_len);
+        debug_buf[1] = @intCast(ctx.remaining);
+        debug_buf[2] = @intCast(header.num_instructions);
+        debug_buf[3] = instr_idx;
+        debug_buf[4] = @intFromEnum(opcode);
+        instr_idx += 1;
+
         switch (opcode) {
             .tile_load_act => try tileLoadAct(
                 descs[0..header.num_tensors],
@@ -127,7 +153,13 @@ pub fn execute(payload_len: u16) ExecError!u32 {
         }
     }
 
-    if (!saw_done or ctx.remaining != 0) return error.BadPayloadLen;
+    if (!saw_done or ctx.remaining != 0) {
+        debug_buf[0] = @intCast(payload_len);
+        debug_buf[1] = @intCast(ctx.remaining);
+        debug_buf[2] = @intFromBool(saw_done);
+        debug_buf[3] = instr_idx;
+        return error.BadPayloadLen;
+    }
     return cpu_csr.mcycle.read() -% cycle_start;
 }
 
@@ -222,7 +254,6 @@ fn setEpilogue(descs: []const ir.TensorDescriptor, inst: ir.SetEpilogue) ExecErr
     }
     if (inst.n_count == 0 or inst.n_count > array_cols) return error.BadAddress;
 
-    //TODO: Why 4. Also mult -> shift?
     const bias_base = try addU32(bias_desc.base_addr, try mulU32(inst.n_offset, 4));
     const mult_base = try addU32(mult_desc.base_addr, try mulU32(inst.n_offset, 4));
     const shift_base = try addU32(shift_desc.base_addr, try mulU32(inst.n_offset, 4));

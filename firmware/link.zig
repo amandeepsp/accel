@@ -43,8 +43,16 @@ pub fn sendOk(seq_id: u16, data: []const u8, cycles: u16) void {
     sendResponse(seq_id, .ok, data, cycles);
 }
 
-pub fn sendError(seq_id: u16, code: StatusCode) void {
-    sendResponse(seq_id, code, &.{}, 0);
+pub fn sendError(seq_id: u16, code: StatusCode, debug_data: []const u8) void {
+    sendResponse(seq_id, code, debug_data, 0);
+}
+
+pub fn sendDebug(value: u32) void {
+    uart.writeByte('D');
+    uart.writeByte('E');
+    uart.writeByte('B');
+    uart.writeByte('G');
+    uart.writeBytes(std.mem.asBytes(&value));
 }
 
 pub fn drainPayload(len: usize) void {

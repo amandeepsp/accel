@@ -25,7 +25,7 @@ export fn main() void {
                 error.BadMagic => .bad_magic,
                 error.Timeout => .timeout,
             };
-            link.sendError(0, code);
+            link.sendError(0, code, &.{});
             continue;
         };
         current_seq_id = header.seq_id;

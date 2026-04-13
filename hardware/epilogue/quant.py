@@ -24,7 +24,8 @@ class SRDHM(Elaboratable):
     def elaborate(self, platform):
         m = Module()
 
-        nudge = 1 << 30
+        pos_nudge = 1 << 30
+        neg_nudge = 1 - (1 << 30)
 
         # Combinational: multiply + saturation detect
         ab = Signal(signed(64))
@@ -46,7 +47,11 @@ class SRDHM(Elaboratable):
                 self.done.eq(1),
             ]
 
-        # Combinational tail: nudge + extract high bits
+        # Combinational tail: sign-dependent nudge + extract high bits
+        # Matches gemmlowp SaturatingRoundingDoublingHighMul:
+        #   nudge = ab >= 0 ? (1 << 30) : (1 - (1 << 30))
+        nudge = Signal(signed(32))
+        m.d.comb += nudge.eq(Mux(reg_ab[-1], neg_nudge, pos_nudge))
         m.d.comb += self.out.eq(Mux(reg_saturate, INT32_MAX, (reg_ab + nudge)[31:]))
 
         return m

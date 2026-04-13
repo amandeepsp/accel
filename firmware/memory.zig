@@ -19,7 +19,7 @@ pub fn rangeValid(addr: u32, len: u32) bool {
 pub fn writeMem(header: link.Header) void {
     if (header.payload_len < @sizeOf(protocol.WriteMem.ReqHeader)) {
         link.drainPayload(header.payload_len);
-        link.sendError(header.seq_id, .bad_payload_len);
+        link.sendError(header.seq_id, .bad_payload_len, &.{});
         return;
     }
 
@@ -29,7 +29,7 @@ pub fn writeMem(header: link.Header) void {
     const data_len = header.payload_len - @as(u16, @sizeOf(protocol.WriteMem.ReqHeader));
     if (!rangeValid(req_hdr.addr, @as(u32, data_len))) {
         link.drainPayload(data_len);
-        link.sendError(header.seq_id, .bad_address);
+        link.sendError(header.seq_id, .bad_address, &.{});
         return;
     }
 
@@ -51,7 +51,7 @@ pub fn writeMem(header: link.Header) void {
 pub fn readMem(header: link.Header) void {
     if (header.payload_len != @sizeOf(protocol.ReadMem.Req)) {
         link.drainPayload(header.payload_len);
-        link.sendError(header.seq_id, .bad_payload_len);
+        link.sendError(header.seq_id, .bad_payload_len, &.{});
         return;
     }
 
@@ -60,7 +60,7 @@ pub fn readMem(header: link.Header) void {
 
     const data_len: u32 = req.len;
     if (data_len > std.math.maxInt(u16) or !rangeValid(req.addr, data_len)) {
-        link.sendError(header.seq_id, .bad_address);
+        link.sendError(header.seq_id, .bad_address, &.{});
         return;
     }
 

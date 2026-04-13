@@ -32,6 +32,10 @@ accel_status_t accel_ping(AccelHandle *handle);
 uint16_t accel_last_cycles(AccelHandle *handle);
 const char *accel_status_string(accel_status_t code);
 
+accel_status_t accel_write_mem(AccelHandle *handle, uint32_t addr, const uint8_t *data, size_t len);
+accel_status_t accel_read_mem(AccelHandle *handle, uint32_t addr, uint8_t *buf, size_t len);
+accel_status_t accel_exec(AccelHandle *handle, const uint8_t *program, size_t program_len, uint32_t *out_cycles);
+
 #ifdef __cplusplus
 }
 #endif

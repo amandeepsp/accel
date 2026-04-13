@@ -36,7 +36,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const driver_mod = b.createModule(.{
-        .root_source_file = b.path("driver/driver.zig"),
+        .root_source_file = b.path("host/driver.zig"),
         .target = drv_target,
         .optimize = drv_optimize,
     });
@@ -54,7 +54,7 @@ pub fn build(b: *std.Build) void {
     const drv_exe = b.addExecutable(.{
         .name = "driver",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("driver/main.zig"),
+            .root_source_file = b.path("host/main.zig"),
             .target = drv_target,
             .optimize = drv_optimize,
         }),
@@ -66,7 +66,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(drv_exe);
 
     const drv_c_api_mod = b.createModule(.{
-        .root_source_file = b.path("driver/c_api.zig"),
+        .root_source_file = b.path("host/c_api.zig"),
         .target = drv_target,
         .optimize = drv_optimize,
     });
@@ -79,6 +79,9 @@ pub fn build(b: *std.Build) void {
     });
 
     _ = b.addInstallArtifact(drv_c_api_lib, .{});
+
+    const libaccel_step = b.step("libaccel", "Build libaccel.so");
+    libaccel_step.dependOn(&drv_c_api_lib.step);
 
     const run_drv = b.addRunArtifact(drv_exe);
     run_drv.step.dependOn(b.getInstallStep());
@@ -123,31 +126,20 @@ pub fn build(b: *std.Build) void {
         .{build_dir},
     ) catch @panic("OOM");
 
-    // Parse CSR addresses from LiteX csr.json
+    // Parse CSR addresses from LiteX csr.json (optional, only needed for firmware)
     const csr_options = b.addOptions();
-    const csr_json_contents = root_dir.readFileAlloc(
-        b.allocator,
-        csr_json_path,
-        4 * 1024 * 1024,
-    ) catch |e| {
-        std.debug.print("error: cannot read {s}: {}\n", .{ csr_json_path, e });
-        std.debug.print("hint: run the LiteX SoC build first, then pass -Dbuild-dir=<path>\n", .{});
-        std.process.exit(1);
-    };
-    const parsed = std.json.parseFromSlice(
-        std.json.Value,
-        b.allocator,
-        csr_json_contents,
-        .{},
-    ) catch |e| {
-        std.debug.print("error: failed to parse {s}: {}\n", .{ csr_json_path, e });
-        std.process.exit(1);
-    };
-    const regs = parsed.value.object.get("csr_registers").?.object;
-    var it = regs.iterator();
-    while (it.next()) |entry| {
-        const addr: usize = @intCast(entry.value_ptr.object.get("addr").?.integer);
-        csr_options.addOption(usize, entry.key_ptr.*, addr);
+    const maybe_contents: ?[]u8 = root_dir.readFileAlloc(b.allocator, csr_json_path, 4 * 1024 * 1024) catch null;
+    if (maybe_contents) |contents| {
+        const parsed = std.json.parseFromSlice(std.json.Value, b.allocator, contents, .{}) catch return;
+        if (parsed.value.object.get("csr_registers")) |regs| {
+            var it = regs.object.iterator();
+            while (it.next()) |entry| {
+                if (entry.value_ptr.object.get("addr")) |addr_val| {
+                    const addr: usize = @intCast(addr_val.integer);
+                    csr_options.addOption(usize, entry.key_ptr.*, addr);
+                }
+            }
+        }
     }
 
     const fw_mod = b.createModule(.{

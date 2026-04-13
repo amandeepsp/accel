@@ -18,6 +18,10 @@ __pycache__/
 
 # Simulation build artifacts
 sim/cfu/build/
-docs/
+models/*.json
 
 .codex
+
+data/
+docs/
+*.pt

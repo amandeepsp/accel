@@ -9,14 +9,14 @@ pub fn dispatch(header: link.Header) void {
         .read => memory.readMem(header),
         .write => memory.writeMem(header),
         .exec => exec(header),
-        else => link.sendError(header.seq_id, .unknown_op),
+        else => link.sendError(header.seq_id, .unknown_op, &.{}),
     }
 }
 
 fn ping(header: link.Header) void {
     if (header.payload_len != 0) {
         link.drainPayload(header.payload_len);
-        link.sendError(header.seq_id, .bad_payload_len);
+        link.sendError(header.seq_id, .bad_payload_len, &.{});
         return;
     }
 
@@ -24,13 +24,14 @@ fn ping(header: link.Header) void {
 }
 
 fn exec(header: link.Header) void {
-    const cycles = interpreter.execute(header.payload_len) catch |err| {
+    var debug_buf: [8]u8 = undefined;
+    const cycles = interpreter.execute(header.payload_len, &debug_buf) catch |err| {
         const code: link.StatusCode = switch (err) {
             error.BadMagic => .bad_magic,
             error.BadPayloadLen => .bad_payload_len,
             error.BadAddress => .bad_address,
         };
-        link.sendError(header.seq_id, code);
+        link.sendError(header.seq_id, code, &debug_buf);
         return;
     };
 

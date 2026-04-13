@@ -76,7 +76,19 @@ pub const Driver = struct {
                 @intFromEnum(resp_header.status),
             });
             if (resp_header.payload_len > 0) {
-                try self.drainBytes(resp_header.payload_len);
+                var debug_buf: [256]u8 = undefined;
+                const debug_len = @min(resp_header.payload_len, debug_buf.len);
+                const debug_read = try self.port.readAll(debug_buf[0..debug_len]);
+                if (debug_read > 0) {
+                    log.err("debug payload ({d} bytes): {any}", .{
+                        debug_read,
+                        debug_buf[0..debug_read],
+                    });
+                }
+                // Drain remaining bytes
+                if (resp_header.payload_len > debug_read) {
+                    try self.drainBytes(resp_header.payload_len - debug_read);
+                }
             }
             return statusToError(resp_header.status);
         }

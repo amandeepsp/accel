@@ -19,7 +19,7 @@ def ref_srdhm(a: int, b: int) -> int:
     if a == INT32_MIN and b == INT32_MIN:
         return INT32_MAX
     ab = a * b
-    nudge = 1 << 30
+    nudge = (1 << 30) if ab >= 0 else (1 - (1 << 30))
     result = (ab + nudge) >> 31
     return max(INT32_MIN, min(INT32_MAX, result))
 

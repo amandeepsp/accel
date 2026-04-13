@@ -23,10 +23,6 @@ verilog:
         --cfu-in-width {{ cfu_in_width }} \
         --cfu-acc-width {{ cfu_acc_width }}
 
-# Run the driver against a real device
-driver:
-    zig build run -- {{ port }}
-
 # Build the LiteX SoC for Tang Nano 20K
 hw-build: verilog
     env PATH={{ oss_cad_bin }}:{{ env_var('PATH') }} \
@@ -48,6 +44,10 @@ hw-flash:
 hw-reset:
     env PATH={{ oss_cad_bin }}:{{ env_var('PATH') }} \
         openFPGALoader --board tangnano20k --reset
+
+# Build libaccel.so for host Python binding
+libaccel:
+    zig build libaccel -Dbuild-dir=build/sipeed_tang_nano_20k
 
 # Build firmware targeting the hardware SoC
 hw-firmware build-dir="build/sipeed_tang_nano_20k":
@@ -84,9 +84,9 @@ hw-e2e-gemm-large:
 hw-e2e-after-reset:
     just hw-reset
     sleep 2
-    just hw-upload-once {{ port }}
-    just hw-e2e-gemm {{ port }}
-    just hw-e2e-gemm-large {{ port }}
+    just hw-upload-once
+    just hw-e2e-gemm
+    just hw-e2e-gemm-large
 
 # Full hardware flow: build SoC → flash → build firmware → upload
 hw-all: hw-build hw-flash hw-firmware hw-upload-once
