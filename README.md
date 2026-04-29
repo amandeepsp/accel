@@ -35,9 +35,10 @@ CFU hardware (Amaranth → Verilog → LiteX SoC)
 | `firmware/` | Zig             | Bare-metal RISC-V firmware: UART protocol, KIR interpreter, DMA/CFU drivers |
 | `host/`     | Zig             | Host-side native driver + C API (`libloom.so`)          |
 | `shared/`   | Zig + Python    | Wire protocol, IR definitions (shared across firmware, host, and tools) |
-| `tvm/`      | Python          | TVM Relax patterns, codegen, quantization utils, runtime bridge |
+| `compiler/` | Python          | TVM Relax patterns, codegen, quantization utils, runtime bridge |
 | `models/`   | Python          | Int8 MNIST training + static quantization (ONNX export)  |
-| `tools/`    | Python          | E2E test harness, IR bytecode builder, LiteX flash utils |
+| `tests/`    | Python          | E2E GEMM test harness, Verilator sim tests, TVM pipeline tests |
+| `tools/`    | Python          | LiteX flash utils, IR debug helpers                      |
 | `docs/`     | Markdown        | Architecture Decision Records                            |
 | `top.v`     | Verilog (gen.)  | Generated CFU Verilog — never edit directly              |
 
@@ -59,7 +60,7 @@ uv run pytest hardware -v
 just hw-all
 
 # Run end-to-end GEMM test against the board
-just hw-e2e-gemm
+just hw-gemm
 ```
 
 ## Build Order
@@ -71,7 +72,7 @@ RTL changes and firmware builds have a strict dependency chain:
 3. `just hw-flash` — flash bitstream to board
 4. `just hw-firmware` — build firmware (reads CSR addresses from `csr.json`)
 5. `just hw-upload-once` — serial-boot firmware onto running board
-6. `just hw-e2e-gemm` — end-to-end verification
+6. `just hw-gemm` — end-to-end verification
 
 Skipping step 2 before step 4 causes `csr.json not found` errors.
 
@@ -100,18 +101,18 @@ uv run pytest hardware/epilogue/ -v    # Requantization
 uv run pytest hardware/control/ -v     # Sequencer
 
 # E2E on hardware (requires board + firmware)
-just hw-e2e-gemm
-just hw-e2e-gemm-large
+just hw-gemm
+just hw-gemm-reset
 ```
 
 ## TVM Integration
 
-The `tvm/` directory implements an out-of-tree backend for Apache TVM's Relax IR:
+The `compiler/` package implements an out-of-tree backend for Apache TVM's Relax IR:
 
-1. **Pattern matching** (`patterns.py`) — identifies quantized matmul composites (QDQ format) in imported ONNX models
-2. **Codegen** (`codegen.py`) — lowers matched regions to `call_dps_packed` with extracted weights and quantization constants
-3. **Runtime** (`runtime.py`) — bridges TVM packed functions to `libloom.so`, handles memory layout, builds KIR programs, executes on hardware
-4. **Quantization utils** (`quant_utils.py`) — derives per-channel epilogue parameters (bias, multiplier, shift) from ONNX scale/zero-point constants
+1. **Pattern matching** (`compiler/patterns.py`) — identifies quantized matmul composites (QDQ format) in imported ONNX models
+2. **Codegen** (`compiler/codegen.py`) — lowers matched regions to `call_dps_packed` with extracted weights and quantization constants
+3. **Runtime** (`compiler/runtime.py`) — bridges TVM packed functions to `libloom.so`, handles memory layout, builds KIR programs, executes on hardware
+4. **Quantization utils** (`compiler/quant_utils.py`) — derives per-channel epilogue parameters (bias, multiplier, shift) from ONNX scale/zero-point constants
 
 ```sh
 # Train MNIST + export statically-quantized int8 ONNX

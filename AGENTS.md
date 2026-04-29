@@ -11,9 +11,10 @@ Cross-layer stack: Amaranth (RTL), Zig (firmware + driver), Python (SoC integrat
 - `firmware/` — Zig: bare-metal RISC-V (VexRISCV), UART protocol, KIR interpreter, CFU/DMA drivers
 - `shared/` — Zig + Python: wire protocol (`protocol.zig`), IR definitions (`ir.zig`, `ir.py`)
 - `host/` — Zig: native driver + C API (`libloom.so`) for serial communication with board
-- `tvm/` — Python: TVM Relax patterns, codegen, quantization utils, runtime bridge
+- `compiler/` — Python: TVM Relax patterns, codegen, quantization utils, runtime bridge
 - `models/` — Python: int8 MNIST training, static quantization, ONNX export
-- `tools/` — Python: GEMM test harness (`test_gemm.py`), TVM sim test (`tvm_sim_test.py`), IR bytecode builder (`ir.py`), LiteX flash utils
+- `tests/` — Python: E2E GEMM test harness (`test_gemm.py`), Verilator sim tests (`test_sim.py`)
+- `tools/` — Python: LiteX flash utils, IR debug helpers
 - `docs/` — Architecture Decision Records
 - `top.v` — **Generated** Verilog (from `hardware/top.py`)
 
@@ -75,7 +76,7 @@ just sim-gemm m=4 k=16 n=4         # custom sizes
 just sim-tvm
 ```
 
-Tests live in: `hardware/systolic/`, `hardware/memory/`, `hardware/epilogue/`.
+Tests live in: `hardware/systolic/`, `hardware/memory/`, `hardware/epilogue/`, and `tests/`.
 pytest configured in `pyproject.toml` to include these paths.
 
 ## Build Order (Critical)
@@ -114,16 +115,17 @@ When tuning hardware, update Justfile variables — they propagate to both Veril
 - `host/c_api.zig`: C FFI surface (`libloom.so`) — `loom_open`, `loom_exec`, `loom_write_mem`, etc.
 - `firmware/interpreter.zig`: Firmware IR interpreter (executes instructions, drives DMA, sequencer).
 - `tools/ir.py`: ~~Legacy IR bytecode builder~~ (deleted; functionality merged into `shared/ir.py`).
+- `tests/test_sim.py`: pytest-based Verilator sim tests (layer-by-layer GEMM, full ONNX→VM pipeline).
 
 Changing IR requires sync across `shared/ir.zig`, `shared/ir.py`, `firmware/interpreter.zig`, `host/driver.zig`.
 
 ## TVM Integration
 
-- `tvm/patterns.py`: Relax DPL patterns for quantized matmul composites (QDQ format from ONNX).
-- `tvm/codegen.py`: Lowers partitioned regions to `call_dps_packed`, extracts composite constants.
-- `tvm/runtime.py`: `LoomRuntime` class — bridges TVM packed functions to `libloom.so`, memory layout, KIR generation.
-- `tvm/quant_utils.py`: Derives per-channel epilogue params (bias, multiplier, shift) from scale/zero-point.
-- `tvm/relax.py`: `lower_pipeline()` — tiling → partitioning → codegen → lambda lift.
+- `compiler/patterns.py`: Relax DPL patterns for quantized matmul composites (QDQ format from ONNX).
+- `compiler/codegen.py`: Lowers partitioned regions to `call_dps_packed`, extracts composite constants.
+- `compiler/runtime.py`: `LoomRuntime` class — bridges TVM packed functions to `libloom.so`, memory layout, KIR generation.
+- `compiler/quant_utils.py`: Derives per-channel epilogue params (bias, multiplier, shift) from scale/zero-point.
+- `compiler/relax.py`: `lower_pipeline()` — tiling → partitioning → codegen → lambda lift.
 
 The TVM integration is out-of-tree; it imports from `../tvm` (local Apache TVM build).
 
@@ -213,7 +215,7 @@ Parse debug payload in driver output when seeing errors.
 
 ### Common Fixes Applied
 
-1. **`tile_store` field order**: Python emitted `n_offset` before `m_offset`, but firmware struct expects `m_offset` first. Fixed in `tools/ir.py`.
+1. **`tile_store` field order**: Python emitted `n_offset` before `m_offset`, but firmware struct expects `m_offset` first. Fixed in `shared/ir.py`.
 2. **Input `k_offset`**: For `[K, tile]` layout, k_offset should be `k_base * tile` (byte offset within M-tile), not `k_base * 4`.
 3. **Input tensor stride**: Should be `K * tile` bytes (size of one M-tile), matching the `[K, tile]` layout.
 4. **Byte counting**: `readInstruction` was subtracting `@sizeOf(T)` instead of `@sizeOf(T) - 1`.
@@ -221,7 +223,7 @@ Parse debug payload in driver output when seeing errors.
 
 ### Verify IR Struct Alignment
 
-Python `tile_store(m_offset, n_offset)` emits in the same order as Zig `TileStore{m_offset, n_offset}` expects. Always verify byte order matches between `tools/ir.py` and `shared/ir.zig`.
+Python `tile_store(m_offset, n_offset)` emits in the same order as Zig `TileStore{m_offset, n_offset}` expects. Always verify byte order matches between `shared/ir.py` and `shared/ir.zig`.
 
 ## Debugging Hardware
 
