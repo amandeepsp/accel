@@ -1,4 +1,4 @@
-"""Composite matching for the out-of-tree accel backend."""
+"""Composite matching for the out-of-tree loom backend."""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ from tvm import relax
 from tvm.relax.dpl import is_op, wildcard
 from tvm.relax.transform import FuseOpsByPattern, FusionPattern
 
-ACCEL_CODEGEN_NAME = "accel_cfu"
-MATMUL_REQUANT_COMPOSITE_NAME = f"{ACCEL_CODEGEN_NAME}.matmul_requant"
-MATMUL_REQUANT_NO_INPUT_Q_COMPOSITE_NAME = f"{ACCEL_CODEGEN_NAME}.matmul_requant_no_input_q"
+LOOM_CODEGEN_NAME = "loom_cfu"
+MATMUL_REQUANT_COMPOSITE_NAME = f"{LOOM_CODEGEN_NAME}.matmul_requant"
+MATMUL_REQUANT_NO_INPUT_Q_COMPOSITE_NAME = f"{LOOM_CODEGEN_NAME}.matmul_requant_no_input_q"
 
 
 def make_matmul_requant_pattern(
@@ -76,12 +76,12 @@ def make_matmul_requant_pattern(
 
 
 
-def partition_for_accel_cfu(
+def partition_for_loom_cfu(
     mod: tvm.IRModule,
     *,
     patterns: Iterable[FusionPattern] | None = None,
 ) -> tvm.IRModule:
-    """Partition Relax regions intended for the accel backend.
+    """Partition Relax regions intended for the loom backend.
 
     Parameters
     ----------

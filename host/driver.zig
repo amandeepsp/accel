@@ -2,9 +2,9 @@ const std = @import("std");
 const serial = @import("serial");
 const protocol = @import("protocol");
 
-const log = std.log.scoped(.accel);
+const log = std.log.scoped(.loom);
 
-pub const AccelError = error{
+pub const LoomError = error{
     PayloadTooLarge,
     BadResponse,
     BadMagic,
@@ -209,7 +209,7 @@ const Transport = union(enum) {
     }
 };
 
-fn statusToError(status: protocol.StatusCode) AccelError {
+fn statusToError(status: protocol.StatusCode) LoomError {
     return switch (status) {
         .ok => unreachable,
         .unknown_op => error.UnknownOp,

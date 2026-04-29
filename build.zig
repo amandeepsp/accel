@@ -81,15 +81,15 @@ pub fn build(b: *std.Build) void {
     drv_c_api_mod.addImport("driver", driver_mod);
 
     const drv_c_api_lib = b.addLibrary(.{
-        .name = "accel",
+        .name = "loom",
         .linkage = .dynamic,
         .root_module = drv_c_api_mod,
     });
 
     _ = b.addInstallArtifact(drv_c_api_lib, .{});
 
-    const libaccel_step = b.step("host-lib", "Build libaccel.so");
-    libaccel_step.dependOn(&drv_c_api_lib.step);
+    const libloom_step = b.step("host-lib", "Build libloom.so");
+    libloom_step.dependOn(&drv_c_api_lib.step);
 
     const run_drv = b.addRunArtifact(drv_exe);
     run_drv.step.dependOn(b.getInstallStep());

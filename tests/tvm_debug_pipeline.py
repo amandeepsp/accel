@@ -18,8 +18,8 @@ from tvm.relax.frontend.onnx import from_onnx
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from compiler.codegen import COMPOSITE_CONSTANTS, lower_accel_regions
-from compiler.patterns import partition_for_accel_cfu
+from compiler.codegen import COMPOSITE_CONSTANTS, lower_loom_regions
+from compiler.patterns import partition_for_loom_cfu
 
 
 def ascii_onnx(model: onnx.ModelProto, max_nodes: int = 40) -> None:
@@ -85,11 +85,11 @@ def main() -> int:
     mod = from_onnx(model_proto, shape_dict=shape_dict, keep_params_in_input=False)
     ascii_relax(mod, "Stage 0: After ONNX import")
 
-    mod = partition_for_accel_cfu(mod)
-    ascii_relax(mod, "Stage 1: After partition_for_accel_cfu")
+    mod = partition_for_loom_cfu(mod)
+    ascii_relax(mod, "Stage 1: After partition_for_loom_cfu")
 
-    mod = lower_accel_regions(mod)
-    ascii_relax(mod, "Stage 2: After lower_accel_regions")
+    mod = lower_loom_regions(mod)
+    ascii_relax(mod, "Stage 2: After lower_loom_regions")
     show_composite_constants()
 
     mod = relax.transform.LambdaLift()(mod)

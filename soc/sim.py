@@ -99,7 +99,7 @@ class CfuDmaAdapter(Module):
 
 # Simulation SoC -----------------------------------------------------------------------------------
 
-class AccelSimSoC(SoCCore):
+class LoomSimSoC(SoCCore):
     def __init__(self,
         cfu_rows        = 8,
         cfu_cols        = 8,
@@ -121,7 +121,7 @@ class AccelSimSoC(SoCCore):
 
         # SoCCore ----------------------------------------------------------------------------------
         SoCCore.__init__(self, platform, clk_freq=sys_clk_freq,
-            ident="Accel CFU Simulation",
+            ident="Loom CFU Simulation",
             **kwargs)
 
         # SDRAM ------------------------------------------------------------------------------------
@@ -187,7 +187,7 @@ class AccelSimSoC(SoCCore):
 
 def main():
     from litex.build.parser import LiteXArgumentParser
-    parser = LiteXArgumentParser(description="Accel CFU Simulation")
+    parser = LiteXArgumentParser(description="Loom CFU Simulation")
     parser.set_platform(SimPlatform)
 
     # CFU parameters.
@@ -230,7 +230,7 @@ def main():
     sdram_init = []
     ram_boot_address = None
     if args.sdram_init is not None:
-        conf_soc = AccelSimSoC(
+        conf_soc = LoomSimSoC(
             cfu_rows        = args.cfu_rows,
             cfu_cols        = args.cfu_cols,
             cfu_store_depth = args.cfu_store_depth,
@@ -244,7 +244,7 @@ def main():
         )
         ram_boot_address = get_boot_address(args.sdram_init)
 
-    soc = AccelSimSoC(
+    soc = LoomSimSoC(
         cfu_rows         = args.cfu_rows,
         cfu_cols         = args.cfu_cols,
         cfu_store_depth  = args.cfu_store_depth,

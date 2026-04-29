@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**accel** — RISC-V Custom Function Unit (CFU) accelerator for ML on FPGA (Tang Nano 20K).
+**loom** — RISC-V Custom Function Unit (CFU) accelerator for ML on FPGA (Tang Nano 20K).
 Cross-layer stack: Amaranth (RTL), Zig (firmware + driver), Python (SoC integration).
 
 ### Directory Map
@@ -10,7 +10,7 @@ Cross-layer stack: Amaranth (RTL), Zig (firmware + driver), Python (SoC integrat
 - `hardware/` — Amaranth Python RTL: CFU datapath, systolic array, DMA scratchpads, sequencer, epilogue
 - `firmware/` — Zig: bare-metal RISC-V (VexRISCV), UART protocol, KIR interpreter, CFU/DMA drivers
 - `shared/` — Zig + Python: wire protocol (`protocol.zig`), IR definitions (`ir.zig`, `ir.py`)
-- `host/` — Zig: native driver + C API (`libaccel.so`) for serial communication with board
+- `host/` — Zig: native driver + C API (`libloom.so`) for serial communication with board
 - `tvm/` — Python: TVM Relax patterns, codegen, quantization utils, runtime bridge
 - `models/` — Python: int8 MNIST training, static quantization, ONNX export
 - `tools/` — Python: GEMM test harness (`test_gemm.py`), TVM sim test (`tvm_sim_test.py`), IR bytecode builder (`ir.py`), LiteX flash utils
@@ -111,7 +111,7 @@ When tuning hardware, update Justfile variables — they propagate to both Veril
 - `shared/ir.py`: Python IR definitions and `ProgramBuilder` — single source of truth for bytecode format.
 - `shared/protocol.zig`: UART framing (CRC, control sequences).
 - `host/driver.zig`: Host-side serial communication + CFU instruction dispatch.
-- `host/c_api.zig`: C FFI surface (`libaccel.so`) — `accel_open`, `accel_exec`, `accel_write_mem`, etc.
+- `host/c_api.zig`: C FFI surface (`libloom.so`) — `loom_open`, `loom_exec`, `loom_write_mem`, etc.
 - `firmware/interpreter.zig`: Firmware IR interpreter (executes instructions, drives DMA, sequencer).
 - `tools/ir.py`: ~~Legacy IR bytecode builder~~ (deleted; functionality merged into `shared/ir.py`).
 
@@ -121,7 +121,7 @@ Changing IR requires sync across `shared/ir.zig`, `shared/ir.py`, `firmware/inte
 
 - `tvm/patterns.py`: Relax DPL patterns for quantized matmul composites (QDQ format from ONNX).
 - `tvm/codegen.py`: Lowers partitioned regions to `call_dps_packed`, extracts composite constants.
-- `tvm/runtime.py`: `AccelRuntime` class — bridges TVM packed functions to `libaccel.so`, memory layout, KIR generation.
+- `tvm/runtime.py`: `LoomRuntime` class — bridges TVM packed functions to `libloom.so`, memory layout, KIR generation.
 - `tvm/quant_utils.py`: Derives per-channel epilogue params (bias, multiplier, shift) from scale/zero-point.
 - `tvm/relax.py`: `lower_pipeline()` — tiling → partitioning → codegen → lambda lift.
 
@@ -241,7 +241,7 @@ uv run pytest hardware -v
 
 ### GEMM Test Variants
 
-`accel-gemm` supports two test variants:
+`loom-gemm` supports two test variants:
 - **non-pipelined** → Load → DMA wait → Compute → Store (no overlap)
 - **pipelined** → Full K-tiling with DMA/compute overlap
 
@@ -260,6 +260,6 @@ Driver outputs to stderr. Use `-v` flag for verbose output showing all driver co
 No pre-commit hooks or CI workflows currently defined. Manual checks:
 - `uv run pytest hardware` must pass (Amaranth simulation).
 - `just hw-all` must complete end-to-end on Tang Nano 20K.
-- `accel-gemm /dev/ttyUSB1 all --verify-tolerance 1` should pass.
+- `loom-gemm /dev/ttyUSB1 all --verify-tolerance 1` should pass.
 - `just sim-gemm` should pass (GEMM regression on Verilator).
 - Don't commit `top.v` if it's stale; regenerate before committing.

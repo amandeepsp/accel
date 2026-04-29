@@ -23,7 +23,7 @@ STATUS_OK = 0x00
 
 @dataclass(frozen=True)
 class Response:
-    """Parsed response from the accelerator."""
+    """Parsed response from the loom."""
 
     status: int
     payload: bytes

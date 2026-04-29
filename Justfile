@@ -1,4 +1,4 @@
-# accel — RISC-V CFU accelerator task runner
+# loom — RISC-V CFU accelerator task runner
 
 set dotenv-load := false
 
@@ -46,8 +46,8 @@ hw-reset:
     env PATH={{ oss_cad_bin }}:{{ env_var('PATH') }} \
         openFPGALoader --board tangnano20k --reset
 
-# Build libaccel.so for host Python binding
-libaccel:
+# Build libloom.so for host Python binding
+libloom:
     zig build libaccel -Dbuild-dir=build/sipeed_tang_nano_20k
 
 # Build firmware targeting the hardware SoC
@@ -71,7 +71,7 @@ hw-upload-once:
 # === Hardware tests (require board + running firmware) =======================
 
 # Run GEMM test against real hardware.  Tunable: m, k, n, variant, verify-tolerance.
-hw-gemm m="8" k="8" n="8" variant="all" verify-tolerance="1": libaccel hw-firmware
+hw-gemm m="8" k="8" n="8" variant="all" verify-tolerance="1": libloom hw-firmware
     uv run python -m tests.test_gemm {{ port }} {{ variant }} \
         --m {{ m }} --k {{ k }} --n {{ n }} \
         --cfu-word-bits $(({{ cfu_rows }} * {{ cfu_in_width }})) \

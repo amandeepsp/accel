@@ -1,4 +1,4 @@
-"""Host runtime bridge for the out-of-tree accel integration."""
+"""Host runtime bridge for the out-of-tree loom integration."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ TENSOR_POOL_BASE = 0x40010000
 MEM_ALIGN = 32
 
 
-class AccelRuntimeError(RuntimeError):
+class LoomRuntimeError(RuntimeError):
     """Raised when the host runtime cannot complete an accelerator operation."""
 
 
@@ -32,7 +32,7 @@ class RuntimeConfig:
 
     port: str = "/dev/ttyUSB1"
     baud_rate: int = 115200
-    lib_path: str = "zig-out/lib/libaccel.so"
+    lib_path: str = "zig-out/lib/libloom.so"
     tile: int = 8
     cfu_word_bits: int = 64
     cfu_store_depth_words: int = 512
@@ -41,23 +41,23 @@ class RuntimeConfig:
 
 
 # ---------------------------------------------------------------------------
-# Transport layer — decouples AccelRuntime from wire protocol
+# Transport layer — decouples LoomRuntime from wire protocol
 # ---------------------------------------------------------------------------
 
 # Re-export shared transport classes for backward compatibility.
 from shared.protocol import TcpTransport
 
 # ---------------------------------------------------------------------------
-# Serial transport (libaccel.so via ctypes)
+# Serial transport (libloom.so via ctypes)
 # ---------------------------------------------------------------------------
 
 
-class _AccelHandle(ct.Structure):
+class _LoomHandle(ct.Structure):
     """Opaque C handle for the accelerator driver."""
 
 
 class SerialTransport:
-    """Transport over a physical serial port via ``libaccel.so``.
+    """Transport over a physical serial port via ``libloom.so``.
 
     Supports an extra ``ping`` method not available on the TCP transport.
     """
@@ -66,7 +66,7 @@ class SerialTransport:
         lib = ct.CDLL(str(lib_path))
         self._configure(lib)
         self._lib = lib
-        self._handle: ct.POINTER(_AccelHandle) | None = None
+        self._handle: ct.POINTER(_LoomHandle) | None = None
         self._port = port
         self._baud_rate = baud_rate
 
@@ -74,36 +74,36 @@ class SerialTransport:
     def _configure(lib) -> None:
         lib.accel_open.argtypes = [
             ct.c_char_p, ct.c_uint32,
-            ct.POINTER(ct.POINTER(_AccelHandle)),
+            ct.POINTER(ct.POINTER(_LoomHandle)),
         ]
         lib.accel_open.restype = ct.c_int
 
-        lib.accel_close.argtypes = [ct.POINTER(_AccelHandle)]
+        lib.accel_close.argtypes = [ct.POINTER(_LoomHandle)]
         lib.accel_close.restype = None
 
-        lib.accel_ping.argtypes = [ct.POINTER(_AccelHandle)]
+        lib.accel_ping.argtypes = [ct.POINTER(_LoomHandle)]
         lib.accel_ping.restype = ct.c_int
 
-        lib.accel_last_cycles.argtypes = [ct.POINTER(_AccelHandle)]
+        lib.accel_last_cycles.argtypes = [ct.POINTER(_LoomHandle)]
         lib.accel_last_cycles.restype = ct.c_uint16
 
         lib.accel_status_string.argtypes = [ct.c_int]
         lib.accel_status_string.restype = ct.c_char_p
 
         lib.accel_write_mem.argtypes = [
-            ct.POINTER(_AccelHandle), ct.c_uint32,
+            ct.POINTER(_LoomHandle), ct.c_uint32,
             ct.POINTER(ct.c_uint8), ct.c_size_t,
         ]
         lib.accel_write_mem.restype = ct.c_int
 
         lib.accel_read_mem.argtypes = [
-            ct.POINTER(_AccelHandle), ct.c_uint32,
+            ct.POINTER(_LoomHandle), ct.c_uint32,
             ct.POINTER(ct.c_uint8), ct.c_size_t,
         ]
         lib.accel_read_mem.restype = ct.c_int
 
         lib.accel_exec.argtypes = [
-            ct.POINTER(_AccelHandle),
+            ct.POINTER(_LoomHandle),
             ct.POINTER(ct.c_uint8), ct.c_size_t,
             ct.POINTER(ct.c_uint32),
         ]
@@ -112,7 +112,7 @@ class SerialTransport:
     def open(self) -> None:
         if self._handle is not None:
             return
-        handle = ct.POINTER(_AccelHandle)()
+        handle = ct.POINTER(_LoomHandle)()
         status = self._lib.accel_open(
             self._port.encode("utf-8"), self._baud_rate, ct.byref(handle))
         self._check_status(status, "accel_open")
@@ -162,7 +162,7 @@ class SerialTransport:
     def _check_status(self, status: int, opname: str) -> None:
         if status != 0:
             detail = self.status_string(status)
-            raise AccelRuntimeError(f"{opname} failed: {detail}")
+            raise LoomRuntimeError(f"{opname} failed: {detail}")
 
 
 @visitor
@@ -242,17 +242,17 @@ def _as_i32_vector(value: Any, *, name: str, length: int) -> np.ndarray:
 
 
 # Transport union: either TCP or serial
-AccelTransport = TcpTransport | SerialTransport
+LoomTransport = TcpTransport | SerialTransport
 
 
-class AccelRuntime:
+class LoomRuntime:
     """Runtime for tile-oriented GEMM execution on the accelerator.
 
     Requires a *transport* — ``TcpTransport`` for Verilator simulation or
-    ``SerialTransport`` for real hardware via ``libaccel.so``.
+    ``SerialTransport`` for real hardware via ``libloom.so``.
     """
 
-    def __init__(self, transport: AccelTransport,
+    def __init__(self, transport: LoomTransport,
                  config: RuntimeConfig | None = None):
         self.transport = transport
         self.config = config or RuntimeConfig()
@@ -264,7 +264,7 @@ class AccelRuntime:
     def close(self) -> None:
         self.transport.close()
 
-    def __enter__(self) -> "AccelRuntime":
+    def __enter__(self) -> "LoomRuntime":
         self.open()
         return self
 
@@ -273,12 +273,12 @@ class AccelRuntime:
 
     def ping(self) -> None:
         if not isinstance(self.transport, SerialTransport):
-            raise AccelRuntimeError("ping only available on serial transport")
+            raise LoomRuntimeError("ping only available on serial transport")
         self.transport.ping()
 
     def last_cycles(self) -> int:
         if not isinstance(self.transport, SerialTransport):
-            raise AccelRuntimeError("last_cycles only available on serial transport")
+            raise LoomRuntimeError("last_cycles only available on serial transport")
         return self.transport.last_cycles()
 
     def write_mem(self, addr: int, data: bytes | bytearray | memoryview) -> None:
@@ -416,7 +416,7 @@ def _copy_result_to_output(out: Any, result: np.ndarray) -> None:
     raise TypeError(f"unsupported DPS output object: {type(out)!r}")
 
 
-def _make_accel_packed(symbol: str, runtime: AccelRuntime):
+def _make_loom_packed(symbol: str, runtime: LoomRuntime):
     """Create an accelerator-backed packed function.
 
     This function looks up the composite constants for the symbol and
@@ -514,7 +514,7 @@ def _make_accel_packed(symbol: str, runtime: AccelRuntime):
             activation_max=int(act_max),
         )
 
-        # The accel returns int8, but the Relax composite expects float32
+        # The loom returns int8, but the Relax composite expects float32
         # because it ends with a dequantize node.  Dequantize before returning.
         result_float = (result.astype(np.float32) - float(output_zp)) * float(output_scale)
         result_copy = np.ascontiguousarray(result_float)
@@ -530,7 +530,7 @@ def _make_accel_packed(symbol: str, runtime: AccelRuntime):
 def register_runtime_functions(
     mod: tvm.IRModule,
     *,
-    runtime: AccelRuntime | None = None,
+    runtime: LoomRuntime | None = None,
     override: bool = True,
 ) -> list[str]:
     """Register accelerator-backed packed functions referenced by a lowered Relax module.
@@ -550,7 +550,7 @@ def register_runtime_functions(
         runtime = create_runtime()
 
     for symbol in symbols:
-        packed = _make_accel_packed(symbol, runtime)
+        packed = _make_loom_packed(symbol, runtime)
         tvm.register_global_func(symbol, packed, override=override)
 
     return symbols
@@ -560,9 +560,9 @@ def create_runtime(
     *,
     port: str = "/dev/ttyUSB1",
     baud_rate: int = 115200,
-    lib_path: str = "zig-out/lib/libaccel.so",
-) -> AccelRuntime:
+    lib_path: str = "zig-out/lib/libloom.so",
+) -> LoomRuntime:
     """Create a configured runtime instance with a serial transport."""
 
     transport = SerialTransport(port=port, baud_rate=baud_rate, lib_path=lib_path)
-    return AccelRuntime(transport, RuntimeConfig(port=port, baud_rate=baud_rate, lib_path=lib_path))
+    return LoomRuntime(transport, RuntimeConfig(port=port, baud_rate=baud_rate, lib_path=lib_path))

@@ -1,7 +1,7 @@
 const std = @import("std");
 const driver = @import("driver");
 
-pub const AccelStatus = enum(c_int) {
+pub const LoomStatus = enum(c_int) {
     ok = 0,
     invalid_argument = 1,
     payload_too_large = 2,
@@ -16,7 +16,7 @@ pub const AccelStatus = enum(c_int) {
     out_of_memory = 11,
     io_error = 12,
 
-    pub fn describe(self: AccelStatus) [*:0]const u8 {
+    pub fn describe(self: LoomStatus) [*:0]const u8 {
         return switch (self) {
             .ok => "ok",
             .invalid_argument => "invalid argument",
@@ -34,7 +34,7 @@ pub const AccelStatus = enum(c_int) {
         };
     }
 
-    pub fn fromError(err: anyerror) AccelStatus {
+    pub fn fromError(err: anyerror) LoomStatus {
         return switch (err) {
             error.InvalidDimensions => .invalid_argument,
             error.PayloadTooLarge => .payload_too_large,
@@ -54,15 +54,15 @@ pub const AccelStatus = enum(c_int) {
 
 inline fn require(comptime T: type, opt: ?T) union(enum) { ok: T, err: c_int } {
     if (opt) |v| return .{ .ok = v };
-    return .{ .err = @intFromEnum(AccelStatus.invalid_argument) };
+    return .{ .err = @intFromEnum(LoomStatus.invalid_argument) };
 }
 
 inline fn mapError(err: anyerror) c_int {
-    return @intFromEnum(AccelStatus.fromError(err));
+    return @intFromEnum(LoomStatus.fromError(err));
 }
 
-inline fn unwrapHandle(handle: ?*AccelHandle) *AccelHandle {
-    return switch (require(*AccelHandle, handle)) {
+inline fn unwrapHandle(handle: ?*LoomHandle) *LoomHandle {
+    return switch (require(*LoomHandle, handle)) {
         .ok => |v| v,
         .err => |e| return e,
     };
@@ -75,21 +75,21 @@ inline fn unwrapPtr(comptime T: type, opt: ?T) T {
     };
 }
 
-pub const AccelHandle = struct {
+pub const LoomHandle = struct {
     driver: driver.Driver,
 };
 
-pub export fn accel_open(
+pub export fn loom_open(
     port_path: ?[*:0]const u8,
     baud_rate: u32,
-    out_handle: ?*?*AccelHandle,
+    out_handle: ?*?*LoomHandle,
 ) c_int {
     const path = unwrapPtr([*:0]const u8, port_path);
-    const handle_ptr = unwrapPtr(*?*AccelHandle, out_handle);
+    const handle_ptr = unwrapPtr(*?*LoomHandle, out_handle);
 
-    const handle = std.heap.page_allocator.create(AccelHandle) catch {
+    const handle = std.heap.page_allocator.create(LoomHandle) catch {
         handle_ptr.* = null;
-        return @intFromEnum(AccelStatus.out_of_memory);
+        return @intFromEnum(LoomStatus.out_of_memory);
     };
     errdefer std.heap.page_allocator.destroy(handle);
 
@@ -99,29 +99,29 @@ pub export fn accel_open(
     };
 
     handle_ptr.* = handle;
-    return @intFromEnum(AccelStatus.ok);
+    return @intFromEnum(LoomStatus.ok);
 }
 
-pub export fn accel_close(handle: ?*AccelHandle) void {
+pub export fn loom_close(handle: ?*LoomHandle) void {
     if (handle) |h| {
         h.driver.deinit();
         std.heap.page_allocator.destroy(h);
     }
 }
 
-pub export fn accel_ping(handle: ?*AccelHandle) c_int {
+pub export fn loom_ping(handle: ?*LoomHandle) c_int {
     const h = unwrapHandle(handle);
     h.driver.ping() catch |err| return mapError(err);
-    return @intFromEnum(AccelStatus.ok);
+    return @intFromEnum(LoomStatus.ok);
 }
 
-pub export fn accel_last_cycles(handle: ?*AccelHandle) u16 {
+pub export fn loom_last_cycles(handle: ?*LoomHandle) u16 {
     const h = handle orelse return 0;
     return h.driver.last_cycles;
 }
 
-pub export fn accel_write_mem(
-    handle: ?*AccelHandle,
+pub export fn loom_write_mem(
+    handle: ?*LoomHandle,
     addr: u32,
     data: ?[*]const u8,
     len: usize,
@@ -129,11 +129,11 @@ pub export fn accel_write_mem(
     const h = unwrapHandle(handle);
     const ptr = unwrapPtr([*]const u8, data);
     h.driver.writeMem(addr, ptr[0..len]) catch |err| return mapError(err);
-    return @intFromEnum(AccelStatus.ok);
+    return @intFromEnum(LoomStatus.ok);
 }
 
-pub export fn accel_read_mem(
-    handle: ?*AccelHandle,
+pub export fn loom_read_mem(
+    handle: ?*LoomHandle,
     addr: u32,
     buf: ?[*]u8,
     len: usize,
@@ -141,11 +141,11 @@ pub export fn accel_read_mem(
     const h = unwrapHandle(handle);
     const ptr = unwrapPtr([*]u8, buf);
     h.driver.readMem(addr, ptr[0..len]) catch |err| return mapError(err);
-    return @intFromEnum(AccelStatus.ok);
+    return @intFromEnum(LoomStatus.ok);
 }
 
-pub export fn accel_exec(
-    handle: ?*AccelHandle,
+pub export fn loom_exec(
+    handle: ?*LoomHandle,
     program: ?[*]const u8,
     program_len: usize,
     out_cycles: ?*u32,
@@ -155,11 +155,11 @@ pub export fn accel_exec(
     const cycles_ptr = unwrapPtr(*u32, out_cycles);
 
     cycles_ptr.* = h.driver.exec(ptr[0..program_len]) catch |err| return mapError(err);
-    return @intFromEnum(AccelStatus.ok);
+    return @intFromEnum(LoomStatus.ok);
 }
 
-pub export fn accel_status_string(code: c_int) [*:0]const u8 {
-    if (std.meta.intToEnum(AccelStatus, code)) |status| {
+pub export fn loom_status_string(code: c_int) [*:0]const u8 {
+    if (std.meta.intToEnum(LoomStatus, code)) |status| {
         return status.describe();
     } else |_| {
         return "unknown status";

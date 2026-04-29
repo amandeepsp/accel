@@ -2,9 +2,9 @@
 """GEMM end-to-end tests: non-pipelined and pipelined variants.
 
 Usage:
-    accel-e2e-gemm /dev/ttyUSB1 non-pipelined
-    accel-e2e-gemm /dev/ttyUSB1 pipelined
-    accel-e2e-gemm /dev/ttyUSB1 all
+    loom.e2e-gemm /dev/ttyUSB1 non-pipelined
+    loom.e2e-gemm /dev/ttyUSB1 pipelined
+    loom.e2e-gemm /dev/ttyUSB1 all
 """
 
 import argparse
@@ -24,15 +24,15 @@ from shared.layout import align_up, pack_input_tiles, pack_weight_rows
 from shared.protocol import SerialTransport, TcpTransport
 from shared.reference import INT32_MAX, INT32_MIN, ref_rdbpot, ref_srdhm
 
-log = logging.getLogger("accel.e2e")
+log = logging.getLogger("loom.e2e")
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 DRIVER_BIN = REPO_ROOT / "zig-out" / "bin" / "driver"
-DEFAULT_CFU_WORD_BITS = int(os.environ.get("ACCEL_CFU_WORD_BITS", "64"))
+DEFAULT_CFU_WORD_BITS = int(os.environ.get("LOOM_CFU_WORD_BITS", "64"))
 DEFAULT_CFU_STORE_DEPTH_WORDS = int(
-    os.environ.get("ACCEL_CFU_STORE_DEPTH_WORDS", "512")
+    os.environ.get("LOOM_CFU_STORE_DEPTH_WORDS", "512")
 )
-DEFAULT_DRIVER_TIMEOUT_S = float(os.environ.get("ACCEL_DRIVER_TIMEOUT_S", "120"))
+DEFAULT_DRIVER_TIMEOUT_S = float(os.environ.get("LOOM_DRIVER_TIMEOUT_S", "120"))
 TENSOR_POOL_BASE = 0x40010000
 MEM_ALIGN = 32
 
@@ -174,7 +174,7 @@ def open_transport(port: str, timeout_s: float):
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     parser = argparse.ArgumentParser(
-        description="Run GEMM end-to-end test against accel board.",
+        description="Run GEMM end-to-end test against loom board.",
     )
     parser.add_argument("port", default="/dev/ttyUSB1")
     parser.add_argument(

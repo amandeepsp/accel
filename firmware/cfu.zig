@@ -1,4 +1,4 @@
-/// CFU (Custom Function Unit) interface for the accelerator ISA in docs/isa.md.
+/// CFU (Custom Function Unit) interface for the loom ISA in docs/isa.md.
 ///
 /// All instructions use CUSTOM_0 (opcode 0x0B) with R-type encoding:
 ///   31:25 funct7 | 24:20 rs2 | 19:15 rs1 | 14:12 funct3 | 11:7 rd | 6:0 opcode

@@ -1,4 +1,4 @@
-"""Lowering from Relax composite regions to accel runtime calls."""
+"""Lowering from Relax composite regions to loom runtime calls."""
 
 from __future__ import annotations
 
@@ -9,16 +9,16 @@ import tvm
 from tvm import relax
 
 from .patterns import ACCEL_CODEGEN_NAME
-from shared.ir import ACCEL_EXTERN_PREFIX
+from shared.ir import LOOM_EXTERN_PREFIX
 
 COMPOSITE_CONSTANTS: dict[str, dict[str, Any]] = {}
 
 
 def make_extern_symbol(global_var: relax.GlobalVar) -> str:
-    """Return the packed-runtime symbol name for a lowered accel region."""
+    """Return the packed-runtime symbol name for a lowered loom region."""
 
     name = global_var.name_hint.replace(".", "_")
-    return f"{ACCEL_EXTERN_PREFIX}.{name}"
+    return f"{LOOM_EXTERN_PREFIX}.{name}"
 
 
 def _extract_composite_constants(func: relax.Function) -> dict[str, Any]:
@@ -136,8 +136,8 @@ def _build_var_map(expr: relax.Expr) -> dict[relax.Var, relax.Expr]:
 
 
 @relax.expr_functor.mutator
-class _AccelRegionLowerer(relax.PyExprMutator):
-    """Rewrite calls to accel-partitioned functions into runtime-call form.
+class _LoomRegionLowerer(relax.PyExprMutator):
+    """Rewrite calls to loom-partitioned functions into runtime-call form.
 
     Uses a two-pass approach:
     1. Pre-extract constants from all codegen functions in the module.
@@ -212,7 +212,7 @@ class _AccelRegionLowerer(relax.PyExprMutator):
         return None, None
 
     def transform(self) -> tvm.IRModule:
-        """Return a module with accel calls lowered to `call_dps_packed`."""
+        """Return a module with loom calls lowered to `call_dps_packed`."""
         for global_var, func in self.mod_.functions.items():
             if not isinstance(func, relax.Function):
                 continue
@@ -267,16 +267,16 @@ class _AccelRegionLowerer(relax.PyExprMutator):
         )
 
 
-def lower_accel_regions(mod: tvm.IRModule) -> tvm.IRModule:
-    """Lower accel-targeted composite regions into runtime-call form.
+def lower_loom_regions(mod: tvm.IRModule) -> tvm.IRModule:
+    """Lower loom-targeted composite regions into runtime-call form.
 
-    The current lowering pass rewrites calls to `Codegen="accel_cfu"` functions
+    The current lowering pass rewrites calls to `Codegen="loom_cfu"` functions
     into `call_dps_packed(ExternFunc(...))` nodes. This gives the out-of-tree
     integration a real runtime-call boundary while the final packed function
     implementation is still being developed.
     """
 
-    return _AccelRegionLowerer(mod).transform()
+    return _LoomRegionLowerer(mod).transform()
 
 
 def get_composite_constants(symbol: str) -> dict[str, Any]:

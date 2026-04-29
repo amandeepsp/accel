@@ -1,4 +1,4 @@
-# accel — RISC-V ML Accelerator on FPGA
+# loom — RISC-V ML Accelerator on FPGA
 
 A full-stack int8 inference accelerator targeting the **Sipeed Tang Nano 20K** (Gowin GW2AR-18).
 Implements an output-stationary systolic array as a VexRiscv Custom Function Unit (CFU),
@@ -9,7 +9,7 @@ with a custom IR, bare-metal firmware, host driver, and TVM compiler integration
 ```
 TVM / Python host
   ↓  ONNX → Relax IR → pattern match → codegen
-Host driver (Zig → libaccel.so, C FFI)
+Host driver (Zig → libloom.so, C FFI)
   ↓  UART serial protocol
 VexRiscv firmware (Zig, bare-metal RISC-V)
   ↓  Kernel bytecode interpreter
@@ -25,7 +25,7 @@ CFU hardware (Amaranth → Verilog → LiteX SoC)
 - **Custom bytecode IR (KIR)** — tile-oriented instructions: load-act, load-wgt, mma, store, set-epilogue, done
 - **K-tiling with DMA/compute overlap** — pipelined execution for matrices larger than scratchpad depth
 - **Software M/N tiling** — handles matrices larger than the array dimensions
-- **TVM Relax integration** — pattern matching for quantized matmul composites, codegen to KIR, runtime bridge via `libaccel.so`
+- **TVM Relax integration** — pattern matching for quantized matmul composites, codegen to KIR, runtime bridge via `libloom.so`
 
 ## Directory Map
 
@@ -33,7 +33,7 @@ CFU hardware (Amaranth → Verilog → LiteX SoC)
 |-------------|-----------------|----------------------------------------------------------|
 | `hardware/` | Python/Amaranth | CFU RTL — systolic array, DMA scratchpads, sequencer, epilogue |
 | `firmware/` | Zig             | Bare-metal RISC-V firmware: UART protocol, KIR interpreter, DMA/CFU drivers |
-| `host/`     | Zig             | Host-side native driver + C API (`libaccel.so`)          |
+| `host/`     | Zig             | Host-side native driver + C API (`libloom.so`)          |
 | `shared/`   | Zig + Python    | Wire protocol, IR definitions (shared across firmware, host, and tools) |
 | `tvm/`      | Python          | TVM Relax patterns, codegen, quantization utils, runtime bridge |
 | `models/`   | Python          | Int8 MNIST training + static quantization (ONNX export)  |
@@ -110,7 +110,7 @@ The `tvm/` directory implements an out-of-tree backend for Apache TVM's Relax IR
 
 1. **Pattern matching** (`patterns.py`) — identifies quantized matmul composites (QDQ format) in imported ONNX models
 2. **Codegen** (`codegen.py`) — lowers matched regions to `call_dps_packed` with extracted weights and quantization constants
-3. **Runtime** (`runtime.py`) — bridges TVM packed functions to `libaccel.so`, handles memory layout, builds KIR programs, executes on hardware
+3. **Runtime** (`runtime.py`) — bridges TVM packed functions to `libloom.so`, handles memory layout, builds KIR programs, executes on hardware
 4. **Quantization utils** (`quant_utils.py`) — derives per-channel epilogue parameters (bias, multiplier, shift) from ONNX scale/zero-point constants
 
 ```sh
@@ -118,5 +118,5 @@ The `tvm/` directory implements an out-of-tree backend for Apache TVM's Relax IR
 uv run python -m models.mnist
 
 # Build the host shared library
-just libaccel
+just libloom
 ```

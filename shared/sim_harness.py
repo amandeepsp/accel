@@ -8,7 +8,7 @@ import numpy as np
 from shared.ir import build_gemm_program, patch_epilogue, plan_memory
 from shared.layout import align_up, pack_input_tiles, pack_weight_rows
 
-log = logging.getLogger("accel.sim_harness")
+log = logging.getLogger("loom.sim_harness")
 
 MEM_ALIGN = 32
 

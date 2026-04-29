@@ -1,4 +1,4 @@
-"""Accel IR definition — single source of truth for bytecode format."""
+"""Loom IR definition — single source of truth for bytecode format."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import ClassVar
 KIR_MAGIC = 0x4B495200
 KIR_VERSION = 1
 
-ACCEL_EXTERN_PREFIX = "accel"
+LOOM_EXTERN_PREFIX = "loom"
 
 TILE_LOAD_ACT = 0x01
 TILE_LOAD_WGT = 0x02

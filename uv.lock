@@ -7,59 +7,6 @@ resolution-markers = [
 ]
 
 [[package]]
-name = "accel"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "amaranth" },
-    { name = "crcmod" },
-    { name = "litedram" },
-    { name = "liteeth" },
-    { name = "litescope" },
-    { name = "litespi" },
-    { name = "litex" },
-    { name = "litex-boards" },
-    { name = "numpy" },
-    { name = "onnx" },
-    { name = "onnxruntime" },
-    { name = "onnxscript" },
-    { name = "pyserial" },
-    { name = "pytest" },
-    { name = "pythondata-cpu-vexriscv" },
-    { name = "pythondata-misc-tapcfg" },
-    { name = "pythondata-software-compiler-rt" },
-    { name = "pythondata-software-picolibc" },
-    { name = "torch" },
-    { name = "torchvision" },
-    { name = "tvm" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "amaranth", specifier = ">=0.5.8" },
-    { name = "crcmod" },
-    { name = "litedram" },
-    { name = "liteeth" },
-    { name = "litescope", specifier = ">=2024.12" },
-    { name = "litespi", specifier = ">=2024.12" },
-    { name = "litex" },
-    { name = "litex-boards" },
-    { name = "numpy", specifier = ">=1.21.0" },
-    { name = "onnx", specifier = ">=1.21.0" },
-    { name = "onnxruntime", specifier = ">=1.23.2" },
-    { name = "onnxscript", specifier = ">=0.1.0" },
-    { name = "pyserial" },
-    { name = "pytest", specifier = ">=9.0.2" },
-    { name = "pythondata-cpu-vexriscv" },
-    { name = "pythondata-misc-tapcfg" },
-    { name = "pythondata-software-compiler-rt" },
-    { name = "pythondata-software-picolibc" },
-    { name = "torch", specifier = ">=2.0.0" },
-    { name = "torchvision", specifier = ">=0.15.0" },
-    { name = "tvm", editable = "../tvm" },
-]
-
-[[package]]
 name = "amaranth"
 version = "0.5.8"
 source = { registry = "https://pypi.org/simple" }
@@ -407,6 +354,59 @@ dependencies = [
     { name = "litex" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/eb/89/4af3aeeb252e3d400612607dd619e5df8ea1aa17c7c24a240ea6c7088340/litex-boards-2023.12.tar.gz", hash = "sha256:1d3d9cfbf8c68ecb76bf5dbaf13edde78b305bdcd05f8da8d4f35b3b54382d66", size = 336791 }
+
+[[package]]
+name = "loom"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "amaranth" },
+    { name = "crcmod" },
+    { name = "litedram" },
+    { name = "liteeth" },
+    { name = "litescope" },
+    { name = "litespi" },
+    { name = "litex" },
+    { name = "litex-boards" },
+    { name = "numpy" },
+    { name = "onnx" },
+    { name = "onnxruntime" },
+    { name = "onnxscript" },
+    { name = "pyserial" },
+    { name = "pytest" },
+    { name = "pythondata-cpu-vexriscv" },
+    { name = "pythondata-misc-tapcfg" },
+    { name = "pythondata-software-compiler-rt" },
+    { name = "pythondata-software-picolibc" },
+    { name = "torch" },
+    { name = "torchvision" },
+    { name = "tvm" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "amaranth", specifier = ">=0.5.8" },
+    { name = "crcmod" },
+    { name = "litedram" },
+    { name = "liteeth" },
+    { name = "litescope", specifier = ">=2024.12" },
+    { name = "litespi", specifier = ">=2024.12" },
+    { name = "litex" },
+    { name = "litex-boards" },
+    { name = "numpy", specifier = ">=1.21.0" },
+    { name = "onnx", specifier = ">=1.21.0" },
+    { name = "onnxruntime", specifier = ">=1.23.2" },
+    { name = "onnxscript", specifier = ">=0.1.0" },
+    { name = "pyserial" },
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pythondata-cpu-vexriscv" },
+    { name = "pythondata-misc-tapcfg" },
+    { name = "pythondata-software-compiler-rt" },
+    { name = "pythondata-software-picolibc" },
+    { name = "torch", specifier = ">=2.0.0" },
+    { name = "torchvision", specifier = ">=0.15.0" },
+    { name = "tvm", editable = "../tvm" },
+]
 
 [[package]]
 name = "markupsafe"

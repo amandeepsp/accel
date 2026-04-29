@@ -11,7 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from compiler import (
-    AccelRuntime, RuntimeConfig, TcpTransport, lower_pipeline,
+    LoomRuntime, RuntimeConfig, TcpTransport, lower_pipeline,
     register_runtime_functions,
 )
 from compiler.quant_utils import quantize_multiplier_less_than_one
@@ -132,7 +132,7 @@ def test_sim_pipeline(sim_port):
     mod = from_onnx(model_proto, shape_dict={"input": [1, 1, 28, 28]},
                     keep_params_in_input=False)
     lowered = lower_pipeline(mod)
-    runtime = AccelRuntime(TcpTransport(sim_port, timeout_s=1800), RuntimeConfig())
+    runtime = LoomRuntime(TcpTransport(sim_port, timeout_s=1800), RuntimeConfig())
     registered = register_runtime_functions(lowered, runtime=runtime)
     assert len(registered) == 2
 
