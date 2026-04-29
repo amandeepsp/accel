@@ -15,7 +15,7 @@ from tvm.relax.expr_functor import PyExprVisitor, visitor
 import importlib.util
 import sys
 
-from shared.ir import build_pipelined_gemm_program, plan_memory
+from shared.ir import build_pipelined_gemm_program, patch_epilogue, plan_memory
 
 TENSOR_POOL_BASE = 0x40010000
 MEM_ALIGN = 32
@@ -511,54 +511,16 @@ class AccelRuntime:
         self.write_mem(shift_addr, shift_data)
 
         # Patch the program epilogue fields for this tile-level invocation.
-        # `shared.ir` emits the same structure as the firmware expects, so it is
-        # safe to rewrite the signed byte fields in place.
-        patched_program = bytearray(program)
-        self._patch_epilogue_bytes(
-            patched_program,
+        program = patch_epilogue(
+            program,
             output_offset=output_offset,
             activation_min=activation_min,
             activation_max=activation_max,
         )
-        self.exec_program(patched_program)
+        self.exec_program(program)
 
         output = self.read_mem(output_addr, output_size)
         return np.frombuffer(output, dtype=np.int8).reshape(m, n).copy()
-
-    def _patch_epilogue_bytes(
-        self,
-        program: bytearray,
-        *,
-        output_offset: int,
-        activation_min: int,
-        activation_max: int,
-    ) -> None:
-        """Rewrite `set_epilogue` immediates in the generated KIR bytecode."""
-
-        set_epilogue_opcode = 0x05
-        tile_load_act_opcode = 0x01
-        tile_load_wgt_opcode = 0x02
-        tile_mma_opcode = 0x03
-        tile_store_opcode = 0x04
-        done_opcode = 0x06
-
-        num_tensors = program[5]
-        cursor = 8 + num_tensors * 16
-        while cursor < len(program):
-            opcode = program[cursor]
-            if opcode == set_epilogue_opcode:
-                program[cursor + 8] = output_offset & 0xFF
-                program[cursor + 9] = activation_min & 0xFF
-                program[cursor + 10] = activation_max & 0xFF
-                cursor += 12
-            elif opcode in (tile_load_act_opcode, tile_load_wgt_opcode):
-                cursor += 8
-            elif opcode in (tile_mma_opcode, done_opcode):
-                cursor += 4
-            elif opcode == tile_store_opcode:
-                cursor += 8
-            else:
-                raise AccelRuntimeError(f"unknown opcode while patching program: 0x{opcode:02x}")
 
 
 def collect_extern_symbols(mod: tvm.IRModule) -> list[str]:

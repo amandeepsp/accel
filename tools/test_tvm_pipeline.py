@@ -30,47 +30,13 @@ from runtime import (
     TcpTransport,
     register_runtime_functions,
 )
+from shared.reference import cpu_requantize
+
 codegen_local = _load_local_module("codegen", "codegen.py")
 COMPOSITE_CONSTANTS = codegen_local.COMPOSITE_CONSTANTS
 get_composite_constants = codegen_local.get_composite_constants
 
 log = logging.getLogger("tvm_pipeline")
-
-# Epilogue reference (matches hardware)
-
-
-INT32_MIN = -(1 << 31)
-INT32_MAX = (1 << 31) - 1
-
-
-def ref_srdhm(a, b):
-    if a == INT32_MIN and b == INT32_MIN:
-        return INT32_MAX
-    ab = a * b
-    nudge = (1 << 30) if ab >= 0 else (1 - (1 << 30))
-    return max(INT32_MIN, min(INT32_MAX, (ab + nudge) >> 31))
-
-
-def ref_rdbpot(x, exponent):
-    if exponent == 0:
-        return x
-    mask = (1 << exponent) - 1
-    remainder = x & mask
-    threshold = (mask >> 1) + ((x >> 31) & 1)
-    return (x >> exponent) + (1 if remainder > threshold else 0)
-
-
-def cpu_requantize(acc, bias, multiplier, shift, output_offset, act_min, act_max):
-    x = acc.astype(np.int64) + bias.astype(np.int64)
-    out = np.zeros(acc.shape, dtype=np.int8)
-    for r in range(acc.shape[0]):
-        for c in range(acc.shape[1]):
-            val = int(x[r, c])
-            val = ref_srdhm(val, int(multiplier[c]))
-            val = ref_rdbpot(val, int(shift[c]))
-            val += output_offset
-            out[r, c] = max(act_min, min(act_max, val))
-    return out
 
 
 def load_onnx_model(onnx_path: str) -> dict:

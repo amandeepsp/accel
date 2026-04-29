@@ -4,35 +4,13 @@ import pytest
 from amaranth.sim import Simulator
 
 from hardware.epilogue.quant import SRDHM, RoundingDividebyPOT
-
-INT32_MIN = -(1 << 31)
-INT32_MAX = (1 << 31) - 1
+from shared.reference import INT32_MAX, INT32_MIN, ref_rdbpot, ref_srdhm
 
 
 def to_signed32(val):
     if val >= (1 << 31):
         val -= 1 << 32
     return val
-
-
-def ref_srdhm(a: int, b: int) -> int:
-    if a == INT32_MIN and b == INT32_MIN:
-        return INT32_MAX
-    ab = a * b
-    nudge = (1 << 30) if ab >= 0 else (1 - (1 << 30))
-    result = (ab + nudge) >> 31
-    return max(INT32_MIN, min(INT32_MAX, result))
-
-
-def ref_rdbpot(x: int, exponent: int) -> int:
-    if exponent == 0:
-        return x
-    mask = (1 << exponent) - 1
-    remainder = x & mask
-    sign_bit = (x >> 31) & 1
-    threshold = (mask >> 1) + sign_bit
-    rounding = 1 if remainder > threshold else 0
-    return (x >> exponent) + rounding
 
 
 class TestSRDHM:

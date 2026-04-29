@@ -23,6 +23,8 @@ from shared.ir import (
     build_pipelined_gemm_program,
     plan_memory,
 )
+from shared.layout import align_up, pack_input_tiles, pack_weight_rows
+from shared.reference import INT32_MAX, INT32_MIN, ref_rdbpot, ref_srdhm
 
 log = logging.getLogger("accel.e2e")
 
@@ -58,69 +60,12 @@ def run(cmd: list[str], *, timeout_s: float) -> str:
     return proc.stdout + proc.stderr
 
 
-def align_up(value: int, alignment: int = MEM_ALIGN) -> int:
-    return (value + alignment - 1) & -alignment
-
-
 def pack_i8(arr: np.ndarray) -> bytes:
     return arr.astype(np.int8).tobytes()
 
 
 def pack_i32(arr: np.ndarray) -> bytes:
     return arr.astype(np.int32).tobytes()
-
-
-def pack_input_tiles(matrix: np.ndarray, tile: int) -> bytes:
-    """Pack [M, K] activation matrix into [K, tile] scratchpad layout.
-
-    The hardware expects [K, tile] column-major layout per M-tile.
-    For each M-tile, we create K rows of tile values each.
-    Layout: [K/tile chunks][K][tile] where K/tile chunks are for each M-tile.
-    """
-    m, k = matrix.shape
-    chunks = []
-    for m_base in range(0, m, tile):
-        tile_slice = matrix[m_base : m_base + tile, :].T  # [K, tile]
-        chunks.append(np.ascontiguousarray(tile_slice))
-    return np.concatenate(chunks).astype(np.int8).tobytes()
-
-
-def pack_weight_rows(matrix: np.ndarray, tile: int = 8) -> bytes:
-    k, n = matrix.shape
-    words = []
-    for t in range(0, n, tile):
-        for kk in range(k):
-            vals = matrix[kk, t:t+tile]
-            if vals.shape[0] < tile:
-                vals = np.pad(vals, (0, tile - vals.shape[0]), mode="constant")
-            words.append(np.ascontiguousarray(vals, dtype=np.int8).tobytes())
-    return b"".join(words)
-
-
-INT32_MIN = -(1 << 31)
-INT32_MAX = (1 << 31) - 1
-
-
-def ref_srdhm(a: int, b: int) -> int:
-    """Saturating Rounding Doubling High Multiply."""
-    if a == INT32_MIN and b == INT32_MIN:
-        return INT32_MAX
-    ab = a * b
-    nudge = (1 << 30) if ab >= 0 else (1 - (1 << 30))
-    result = (ab + nudge) >> 31
-    return max(INT32_MIN, min(INT32_MAX, result))
-
-
-def ref_rdbpot(x: int, exponent: int) -> int:
-    """Rounding Divide by Power of Two."""
-    if exponent == 0:
-        return x
-    mask = (1 << exponent) - 1
-    remainder = x & mask
-    sign_bit = (x >> 31) & 1
-    threshold = (mask >> 1) + sign_bit
-    rounding = 1 if remainder > threshold else 0
-    return (x >> exponent) + rounding
 
 
 def compute_expected(

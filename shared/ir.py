@@ -101,10 +101,50 @@ class Done(_IrType):
     _fmt = "<BBBB"
 
 
+_INSTRUCTION_SIZES = {
+    TILE_LOAD_ACT: struct.calcsize(TileLoadAct._fmt),
+    TILE_LOAD_WGT: struct.calcsize(TileLoadWgt._fmt),
+    TILE_MMA: struct.calcsize(TileMma._fmt),
+    TILE_STORE: struct.calcsize(TileStore._fmt),
+    SET_EPILOGUE: struct.calcsize(SetEpilogue._fmt),
+    DONE: struct.calcsize(Done._fmt),
+}
+
+
 def _pack(ir_type: _IrType) -> bytes:
     fields = [f for f in ir_type.__dataclass_fields__ if not f.startswith("_")]
     vals = [getattr(ir_type, f) for f in fields]
     return struct.pack(ir_type._fmt, *vals)
+
+
+def patch_epilogue(
+    program: bytes | bytearray,
+    *,
+    output_offset: int,
+    activation_min: int,
+    activation_max: int,
+) -> bytes:
+    """Rewrite `set_epilogue` immediates in generated KIR bytecode.
+
+    Returns a new bytes object; the input is not modified.
+    """
+    data = bytearray(program)
+    num_tensors = data[5]
+    header_size = 8 + num_tensors * struct.calcsize(TensorSpec._fmt)
+    cursor = header_size
+    patched = 0
+    while cursor < len(data):
+        opcode = data[cursor]
+        if opcode == SET_EPILOGUE:
+            data[cursor + 8] = output_offset & 0xFF
+            data[cursor + 9] = activation_min & 0xFF
+            data[cursor + 10] = activation_max & 0xFF
+            patched += 1
+        step = _INSTRUCTION_SIZES.get(opcode)
+        if step is None:
+            raise ValueError(f"unknown opcode while patching program: 0x{opcode:02x}")
+        cursor += step
+    return bytes(data)
 
 
 @dataclass

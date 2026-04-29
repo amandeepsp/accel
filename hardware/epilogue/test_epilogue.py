@@ -2,33 +2,7 @@ import pytest
 from amaranth.sim import Simulator
 
 from hardware.epilogue.epilogue import Epilogue, PerChannelStore, PerChannelWriteSelect
-
-INT32_MIN = -(1 << 31)
-INT32_MAX = (1 << 31) - 1
-
-
-def ref_srdhm(a, b):
-    if a == INT32_MIN and b == INT32_MIN:
-        return INT32_MAX
-    return ((a * b) + (1 << 30)) >> 31
-
-
-def ref_rdbpot(x, exponent):
-    if exponent == 0:
-        return x
-    mask = (1 << exponent) - 1
-    remainder = x & mask
-    threshold = (mask >> 1) + ((x >> 31) & 1)
-    return (x >> exponent) + (1 if remainder > threshold else 0)
-
-
-def ref_epilogue(acc, bias, multiplier, shift, output_offset, act_min, act_max):
-    """Full Python reference for one element through the pipeline."""
-    x = acc + bias
-    x = ref_srdhm(x, multiplier)
-    x = ref_rdbpot(x, shift)
-    x += output_offset
-    return max(act_min, min(act_max, x))
+from shared.reference import INT32_MAX, INT32_MIN, ref_epilogue
 
 
 def to_signed8(val):
