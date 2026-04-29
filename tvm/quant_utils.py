@@ -35,46 +35,41 @@ def quantize_multiplier_less_than_one(
 ) -> tuple[np.int32, np.int32]:
     """Decompose a float multiplier into multiplier * 2^(-shift).
 
-    This is the standard TFLite/CMSIS-NN approach for computing the
-    fixed-point multiplier and shift for requantization.
+    The hardware epilogue computes:
+        SRDHM(acc, mult) = round(acc * mult / 2^31)
+        RDBPOT(x, shift)  = x >> shift
 
-    The effective multiplier is: multiplier * 2^(-shift)
-    which approximates the original float_scale.
+    Combined: round(acc * mult / 2^(31 + shift))
+
+    This should equal round(acc * scale), so:
+        mult / 2^(31 + shift) ≈ scale
+
+    For scale < 1.0, shift=0 and mult = round(scale * 2^31).
+    For scale >= 1.0, we reduce mult (right-shift) and increase shift.
 
     Parameters
     ----------
     multiplier:
-        A positive float less than 1.0 representing the requantization scale.
+        A positive float representing the requantization scale.
 
     Returns
     -------
     Tuple of (fixed_point_multiplier, shift)
-        - fixed_point_multiplier: int32 in range [0, 2^31)
+        - fixed_point_multiplier: int32 in range (0, 2^31)
         - shift: int32 in range [0, 31]
     """
     if multiplier <= 0.0:
         return np.int32(0), np.int32(0)
 
-    significand, exponent = math.frexp(multiplier)
-    significand = significand * 2.0
+    mult_q31 = int(round(multiplier * (1 << 31)))
+    shift = 0
 
-    while significand < 0.5:
-        significand *= 2.0
-        exponent -= 1
+    # If multiplier requires more than 31 bits, reduce by right-shifting.
+    while mult_q31 >= (1 << 31):
+        mult_q31 >>= 1
+        shift += 1
 
-    while significand >= 1.0:
-        significand *= 0.5
-        exponent += 1
-
-    significand_int = int(round(significand * (1 << 31)))
-
-    if significand_int >= (1 << 31):
-        significand_int >>= 1
-        exponent += 1
-
-    shift = max(0, -exponent)
-
-    return np.int32(significand_int), np.int32(shift)
+    return np.int32(mult_q31), np.int32(shift)
 
 
 def compute_requantization_params(

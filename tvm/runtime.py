@@ -327,10 +327,17 @@ def pack_input_tiles(matrix: np.ndarray, tile: int) -> bytes:
     return np.concatenate(chunks).astype(np.int8).tobytes()
 
 
-def pack_weight_rows(matrix: np.ndarray) -> bytes:
-    """Pack weights as row-major int8 bytes."""
-
-    return np.ascontiguousarray(matrix, dtype=np.int8).tobytes()
+def pack_weight_rows(matrix: np.ndarray, tile: int = 8) -> bytes:
+    """Pack weights as [K, tile] words expected by the hardware scratchpad."""
+    k, n = matrix.shape
+    words = []
+    for t in range(0, n, tile):
+        for kk in range(k):
+            vals = matrix[kk, t:t+tile]
+            if vals.shape[0] < tile:
+                vals = np.pad(vals, (0, tile - vals.shape[0]), mode="constant")
+            words.append(np.ascontiguousarray(vals, dtype=np.int8).tobytes())
+    return b"".join(words)
 
 
 def _as_i8_matrix(value: Any, *, name: str) -> np.ndarray:
@@ -445,10 +452,7 @@ class AccelRuntime:
         rk, n = rhs_arr.shape
         if k != rk:
             raise ValueError(f"incompatible matmul shapes: {lhs_arr.shape} x {rhs_arr.shape}")
-        if m > self.config.tile or n > self.config.tile:
-            raise ValueError(
-                f"tile execution only supports M,N <= {self.config.tile}, got M={m} N={n}"
-            )
+
 
         bias_arr = _as_i32_vector(bias, name="bias", length=n)
         mult_arr = _as_i32_vector(multiplier, name="multiplier", length=n)
@@ -618,9 +622,6 @@ def _make_accel_packed(symbol: str, runtime: AccelRuntime):
 
         lhs_arr = lhs.numpy()
 
-        if lhs_arr.dtype != np.int8:
-            raise TypeError(f"{symbol} expects int8 input, got {lhs_arr.dtype}")
-
         weight_data = constants.get("weight_data")
         bias_data = constants.get("bias_data")
         weight_scale = constants.get("weight_scale", 1.0)
@@ -629,6 +630,18 @@ def _make_accel_packed(symbol: str, runtime: AccelRuntime):
         input_zp = constants.get("input_zp", 0)
         output_scale = constants.get("output_scale", 1.0)
         output_zp = constants.get("output_zp", 0)
+
+        if lhs_arr.dtype != np.int8:
+            # Input is not int8 — re-quantize from float32 using input_scale/zp.
+            if lhs_arr.dtype == np.float32:
+                lhs_arr = np.clip(
+                    np.round(lhs_arr / float(input_scale) + float(input_zp)),
+                    -128, 127,
+                ).astype(np.int8)
+            else:
+                raise TypeError(
+                    f"{symbol}: expected int8 or float32 input, got {lhs_arr.dtype}"
+                )
 
         if weight_data is None:
             raise ValueError(f"{symbol}: missing weight data in constants")
@@ -645,10 +658,6 @@ def _make_accel_packed(symbol: str, runtime: AccelRuntime):
         if k != rk:
             raise ValueError(f"{symbol}: incompatible shapes lhs {lhs_arr.shape} x weight {weight_arr.shape}")
 
-        if m > runtime.config.tile or n > runtime.config.tile:
-            raise ValueError(
-                f"{symbol}: tile execution only supports M,N <= {runtime.config.tile}, got M={m} N={n}"
-            )
 
         if compute_requantization_params and LayerEpilogueParams:
             epi_params = compute_requantization_params(
@@ -658,7 +667,7 @@ def _make_accel_packed(symbol: str, runtime: AccelRuntime):
                 weight_zero_point=weight_zp,
                 output_scale=output_scale,
                 output_zero_point=output_zp,
-                bias_fp32=bias_arr.astype(np.float32),
+                bias_fp32=bias_arr.astype(np.float32) * float(constants.get("bias_scale", 1.0)),
                 has_relu=False,
                 activation_is_signed=True,
             )
@@ -691,14 +700,19 @@ def _make_accel_packed(symbol: str, runtime: AccelRuntime):
             activation_max=int(act_max),
         )
 
-        if len(args) >= 3:
-            out = args[2]
-            _copy_result_to_output(out, result.astype(np.float32))
+        # Explicit contiguous copy to ensure proper memory lifetime.
+        result_copy = np.ascontiguousarray(result.astype(np.float32))
+
+        if len(args) >= 2:
+            out = args[1]
+            _copy_result_to_output(out, result_copy)
             return None
 
-        return tvm.runtime.tensor(result.astype(np.float32))
+        import sys
+        print(f"[_packed] {symbol[-40:]}: M={m}K={k}N={n} result=[{result.min()},{result.max()}] epi(off={output_offset},min={act_min},max={act_max}) mult=[{multiplier.min()},{multiplier.max()}] shift=[{shift.min()},{shift.max()}] bias=[{bias.min()},{bias.max()}]", file=sys.stderr)
+        return tvm.runtime.tensor(result_copy)
 
-
+    return _packed
 def register_runtime_functions(
     mod: tvm.IRModule,
     *,

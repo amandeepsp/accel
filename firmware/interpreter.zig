@@ -113,7 +113,7 @@ pub fn execute(payload_len: u16, debug_buf: ?[]u8) ExecError!u32 {
 
     const cycle_start = cpu_csr.mcycle.read();
     var saw_done = false;
-    var instr_idx: u8 = 0;
+    var instr_idx: u16 = 0;
 
     for (0..header.num_instructions) |_| {
         const opcode = try ctx.readOpcode();
@@ -121,10 +121,10 @@ pub fn execute(payload_len: u16, debug_buf: ?[]u8) ExecError!u32 {
             buf[0] = @intCast(payload_len);
             buf[1] = @intCast(ctx.remaining);
             buf[2] = @intCast(header.num_instructions);
-            buf[3] = instr_idx;
+            buf[3] = @truncate(instr_idx);
             buf[4] = @intFromEnum(opcode);
         }
-        instr_idx += 1;
+        instr_idx +%= 1;
 
         switch (opcode) {
             .tile_load_act => try tileLoadAct(
@@ -166,7 +166,7 @@ pub fn execute(payload_len: u16, debug_buf: ?[]u8) ExecError!u32 {
             buf[0] = @intCast(payload_len);
             buf[1] = @intCast(ctx.remaining);
             buf[2] = @intFromBool(saw_done);
-            buf[3] = instr_idx;
+            buf[3] = @truncate(instr_idx);
         }
         return error.BadPayloadLen;
     }
@@ -183,7 +183,7 @@ fn tileLoadAct(descs: []const ir.TensorDescriptor, inst: ir.TileLoadAct) ExecErr
     var addr = try addU32(desc.base_addr, row_offset);
     addr = try addU32(addr, inst.k_offset);
 
-    const len_bytes = try mulU32(inst.k_words, 4);
+    const len_bytes = try mulU32(inst.k_words, 8);
     if (!memory.rangeValid(addr, len_bytes)) return error.BadAddress;
 
     const act_dma = dma.Act.init();
@@ -196,11 +196,14 @@ fn tileLoadWgt(descs: []const ir.TensorDescriptor, inst: ir.TileLoadWgt) ExecErr
     if (inst.n_offset >= desc.dim1) return error.BadAddress;
     if (inst.k_words == 0 or inst.k_words > tensor_depth) return error.BadAddress;
 
-    const row_offset = try mulU32(inst.k_offset, desc.stride_row);
-    var addr = try addU32(desc.base_addr, row_offset);
-    addr = try addU32(addr, inst.n_offset);
+    const tile_size: u32 = @as(u32, array_cols);
+    const n_tile = @as(u32, inst.n_offset) / tile_size;
+    const n_tile_offset = try mulU32(n_tile, try mulU32(desc.dim0, tile_size));
+    const row_offset = try mulU32(inst.k_offset, tile_size);
+    var addr = try addU32(desc.base_addr, n_tile_offset);
+    addr = try addU32(addr, row_offset);
 
-    const len_bytes = try mulU32(inst.k_words, 4);
+    const len_bytes = try mulU32(inst.k_words, tile_size);
     if (!memory.rangeValid(addr, len_bytes)) return error.BadAddress;
 
     const wgt_dma = dma.Wgt.init();
@@ -210,10 +213,6 @@ fn tileLoadWgt(descs: []const ir.TensorDescriptor, inst: ir.TileLoadWgt) ExecErr
 fn tileMma(state: *PipeState, inst: ir.TileMma) void {
     if (state.compute_pending) {
         cfu.computeWait();
-        const act_dma = dma.Act.init();
-        const wgt_dma = dma.Wgt.init();
-        act_dma.stop();
-        wgt_dma.stop();
         state.compute_pending = false;
     }
 
@@ -238,7 +237,6 @@ fn tileStore(state: *PipeState, descs: []const ir.TensorDescriptor, inst: ir.Til
         cfu.computeWait();
         const act_dma = dma.Act.init();
         const wgt_dma = dma.Wgt.init();
-        // TODO: Without this we were stuck, why?
         act_dma.stop();
         wgt_dma.stop();
         state.compute_pending = false;
@@ -253,10 +251,9 @@ fn tileStore(state: *PipeState, descs: []const ir.TensorDescriptor, inst: ir.Til
 
         const dst: [*]i8 = @ptrFromInt(dst_addr);
         for (0..inst.n_count) |col| {
-            const global_row: u32 = @as(u32, inst.m_offset) + @as(u32, @intCast(row));
-            const global_col: u32 = @as(u32, inst.n_offset) + @as(u32, @intCast(col));
-            const result_index: i32 = @intCast(global_row * @as(u32, array_cols) + global_col);
-            dst[col] = @truncate(cfu.readResult(result_index));
+            const result_index: i32 = @intCast(@as(u32, @intCast(row)) * @as(u32, array_cols) + @as(u32, @intCast(col)));
+            const result = cfu.readResult(result_index);
+            dst[col] = @truncate(result);
         }
     }
 }

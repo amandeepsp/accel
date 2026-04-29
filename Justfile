@@ -101,7 +101,19 @@ sim-generate: verilog
         --cfu-cols {{ cfu_cols }} \
         --cfu-store-depth {{ cfu_store_depth }} \
         --cfu-in-width {{ cfu_in_width }} \
+        --l2-size 128 \
         --output-dir build/sim
+    just _crt0-restore build/sim
+
+# LiteX BIOS build deletes crt0.o as a cleanup step.  Restore it so the
+# firmware link (which depends on it) doesn't fail.
+_crt0_src := `uv run python -c "import litex; print(litex.__path__[0])" 2>/dev/null` + "/soc/cores/cpu/vexriscv/crt0.S"
+
+_crt0-restore build-dir:
+    @test -f {{ build-dir }}/software/bios/crt0.o || \
+        riscv64-elf-gcc -march=rv32i2p0_m -mabi=ilp32 -D__vexriscv__ \
+        -I{{ build-dir }}/software/bios/../include -c {{ _crt0_src }} \
+        -o {{ build-dir }}/software/bios/crt0.o
 
 # Build firmware targeting the simulation SoC
 sim-firmware: sim-generate
@@ -119,6 +131,7 @@ sim-run: sim-firmware
         --cfu-cols {{ cfu_cols }} \
         --cfu-store-depth {{ cfu_store_depth }} \
         --cfu-in-width {{ cfu_in_width }} \
+        --l2-size 128 \
         --sdram-init zig-out/bin/firmware.bin \
         --output-dir build/sim
 
@@ -129,6 +142,7 @@ sim-run-ci: sim-firmware
         --cfu-cols {{ cfu_cols }} \
         --cfu-store-depth {{ cfu_store_depth }} \
         --cfu-in-width {{ cfu_in_width }} \
+        --l2-size 128 \
         --sdram-init zig-out/bin/firmware.bin \
         --output-dir build/sim \
         --non-interactive
@@ -138,6 +152,7 @@ _sim_args := "--sim-arg=--cfu-rows --sim-arg=" + cfu_rows + " " \
     + "--sim-arg=--cfu-cols --sim-arg=" + cfu_cols + " " \
     + "--sim-arg=--cfu-store-depth --sim-arg=" + cfu_store_depth + " " \
     + "--sim-arg=--cfu-in-width --sim-arg=" + cfu_in_width + " " \
+    + "--sim-arg=--l2-size --sim-arg=128 " \
     + "--sim-arg=--sdram-init --sim-arg=zig-out/bin/firmware.bin " \
     + "--sim-arg=--output-dir --sim-arg=build/sim"
 
@@ -149,7 +164,7 @@ sim-gemm m="8" k="8" n="8" variant="all" verify-tolerance="1": sim-firmware
             --m {{ m }} --k {{ k }} --n {{ n }} \
             --cfu-word-bits $(({{ cfu_rows }} * {{ cfu_in_width }})) \
             --cfu-store-depth-words {{ cfu_store_depth }} \
-            --driver-timeout 600 \
+            --driver-timeout 1800 \
             --verify-tolerance {{ verify-tolerance }}
 
 # TVM path MNIST inference on Verilator simulation.
@@ -157,4 +172,20 @@ sim-tvm verify-tolerance="1": sim-firmware
     uv run python -m tools.sim_run --port {{ sim_port }} {{ _sim_args }} -- \
         uv run python tools/tvm_sim_test.py \
             --tcp tcp://127.0.0.1:{{ sim_port }} \
-            --verify-tolerance {{ verify-tolerance }}
+            --verify-tolerance {{ verify-tolerance }} \
+            --driver-timeout 1800
+
+# Layer 0 in isolation — helps isolate multi-layer state leakage bugs.
+sim-layer0: sim-firmware
+    uv run python -m tools.sim_run --port {{ sim_port }} {{ _sim_args }} -- \
+        uv run python tools/test_layer0_isolated.py \
+            --tcp tcp://127.0.0.1:{{ sim_port }} \
+            --driver-timeout 1800
+
+# Full TVM pipeline (ONNX → Relax → patterns → codegen → sim execution).
+sim-tvm-pipeline enable-tiling="": sim-firmware
+    uv run python -m tools.sim_run --port {{ sim_port }} {{ _sim_args }} -- \
+        uv run python tools/test_tvm_pipeline.py \
+            --tcp tcp://127.0.0.1:{{ sim_port }} \
+            --driver-timeout 1800 \
+            {{ enable-tiling }}

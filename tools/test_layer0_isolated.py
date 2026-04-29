@@ -1,9 +1,5 @@
 #!/usr/bin/env -S uv run python
-"""MNIST inference on Verilator simulation via the TVM runtime transport.
-
-Loads the int8 ONNX model weights, runs both GEMM layers on the sim,
-and compares against a CPU reference that models the hardware epilogue.
-"""
+"""Run Layer 0 (1x784x256) on Verilator sim in isolation and verify against CPU."""
 
 import argparse
 import logging
@@ -19,7 +15,7 @@ sys.path.insert(0, str(REPO_ROOT / "tvm"))
 
 from runtime import TcpTransport, pack_weight_rows
 
-log = logging.getLogger("tvm_sim_test")
+log = logging.getLogger("layer0_isolated")
 
 # ---------------------------------------------------------------------------
 # Epilogue reference (matches hardware: SRDHM + RDBPOT + clamp)
@@ -65,8 +61,22 @@ def cpu_requantize(acc, bias, multiplier, shift, output_offset, act_min, act_max
 
 
 # ---------------------------------------------------------------------------
-# Full GEMM on sim (handles N-tiling and M-padding automatically)
+# Full GEMM on sim (copied from tvm_sim_test.py)
 # ---------------------------------------------------------------------------
+
+
+def pack_input_tiles(matrix, tile):
+    """Pack [M, K] into [K, tile] HW layout, zero-padding partial tiles."""
+    _m, _k = matrix.shape
+    chunks = []
+    for m_base in range(0, _m, tile):
+        ts = matrix[m_base: m_base + tile, :].T  # [K, tile_m]
+        if ts.shape[1] < tile:
+            pad = tile - ts.shape[1]
+            ts = np.pad(ts, ((0, 0), (0, pad)), mode="constant")
+        chunks.append(np.ascontiguousarray(ts))
+    return np.concatenate(chunks).astype(np.int8).tobytes()
+
 
 def run_gemm_on_sim(transport, lhs_orig, rhs, *,
                     bias=None, multiplier=None, shift=None,
@@ -88,7 +98,6 @@ def run_gemm_on_sim(transport, lhs_orig, rhs, *,
     if shift is None:
         shift = np.zeros(n, dtype=np.int32)
 
-    # Zero-pad M to tile multiple (hardware requires full-width DMA rows)
     m = ((m_orig + tile - 1) // tile) * tile
     lhs = np.zeros((m, k), dtype=np.int8)
     lhs[:m_orig, :] = lhs_orig
@@ -118,26 +127,25 @@ def run_gemm_on_sim(transport, lhs_orig, rhs, *,
         cfu_store_depth_words=cfu_store_depth_words,
     )
 
-    # Patch epilogue bytes in-place — every N-tile has its own set_epilogue.
     epi_bytes = bytearray(program)
     num_tensors = epi_bytes[5]
     i = 8 + num_tensors * 16
     patched = 0
     while i < len(epi_bytes):
-        if epi_bytes[i] == 0x05:  # SET_EPILOGUE
+        if epi_bytes[i] == 0x05:
             epi_bytes[i + 8] = output_offset & 0xFF
             epi_bytes[i + 9] = activation_min & 0xFF
             epi_bytes[i + 10] = activation_max & 0xFF
             patched += 1
             i += 12
-        elif epi_bytes[i] in (0x01, 0x02):  # tile_load_act / tile_load_wgt
+        elif epi_bytes[i] in (0x01, 0x02):
             i += 8
-        elif epi_bytes[i] in (0x03, 0x06):  # tile_mma / done
+        elif epi_bytes[i] in (0x03, 0x06):
             i += 4
-        elif epi_bytes[i] == 0x04:  # tile_store
+        elif epi_bytes[i] == 0x04:
             i += 8
         else:
-            print(f"[epilogue] unknown opcode 0x{epi_bytes[i]:02x} at offset {i}, stopping")
+            log.warning("  unknown opcode 0x%02x at offset %d, stopping", epi_bytes[i], i)
             break
     log.info("  Patched %d set_epilogue instructions", patched)
     program = bytes(epi_bytes)
@@ -156,44 +164,28 @@ def run_gemm_on_sim(transport, lhs_orig, rhs, *,
     transport.write_mem(bias_addr, bias_data)
     transport.write_mem(mult_addr, mult_data)
     transport.write_mem(shift_addr, shift_data)
-    log.info("  GEMM %dx%dx%d: uploads done in %.1fs, exec_program starting...",
-             m_orig, k, n, time.monotonic() - t0)
+    log.info("  uploads done in %.1fs, exec_program starting...", time.monotonic() - t0)
 
     t1 = time.monotonic()
     cycles = transport.exec_program(program)
-    log.info("  GEMM %dx%dx%d: exec ok in %.1fs, %d cycles",
-             m_orig, k, n, time.monotonic() - t1, cycles)
+    log.info("  exec ok in %.1fs, %d cycles", time.monotonic() - t1, cycles)
 
     out_bytes = transport.read_mem(output_addr, output_size)
     full = np.frombuffer(out_bytes, dtype=np.int8).reshape(m, n)
     return full[:m_orig, :]
 
 
-def pack_input_tiles(matrix, tile):
-    """Pack [M, K] into [K, tile] HW layout, zero-padding partial tiles."""
-    _m, _k = matrix.shape
-    chunks = []
-    for m_base in range(0, _m, tile):
-        ts = matrix[m_base: m_base + tile, :].T  # [K, tile_m]
-        if ts.shape[1] < tile:
-            pad = tile - ts.shape[1]
-            ts = np.pad(ts, ((0, 0), (0, pad)), mode="constant")
-        chunks.append(np.ascontiguousarray(ts))
-    return np.concatenate(chunks).astype(np.int8).tobytes()
-
-
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main():
-    parser = argparse.ArgumentParser(description="MNIST inference on Verilator sim")
+    parser = argparse.ArgumentParser(description="Layer 0 isolation test on Verilator sim")
     parser.add_argument("--tcp", default="tcp://127.0.0.1:21450")
     parser.add_argument("--onnx", default=str(REPO_ROOT / "models/out/mnist_int8.onnx"))
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--verify-tolerance", type=int, default=1)
-    parser.add_argument("--driver-timeout", type=float, default=1800.0,
-                        help="TCP transport timeout in seconds (default 1800)")
+    parser.add_argument("--driver-timeout", type=float, default=1800.0)
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -201,10 +193,8 @@ def main():
     onnx_path = Path(args.onnx)
     if not onnx_path.exists():
         log.error("ONNX model not found: %s", onnx_path)
-        log.error("Run: uv run python -m models.mnist")
         return 1
 
-    # Load weights
     import onnx
     model = onnx.load(str(onnx_path))
     weights = {}
@@ -213,30 +203,20 @@ def main():
 
     w0 = weights["net.1.weight_quantized"]  # [256, 784] int8
     b0 = weights["net.1.bias_quantized"]    # [256] int32
-    w1 = weights["net.3.weight_quantized"]  # [10, 256] int8
-    b1 = weights["net.3.bias_quantized"]    # [10] int32
+    log.info("Weights: L0=%s b0=%s", w0.shape, b0.shape)
 
-    log.info("Weights: L0=%s b0=%s  L1=%s b1=%s", w0.shape, b0.shape, w1.shape, b1.shape)
-
-    # Random test input
     rng = np.random.default_rng(args.seed)
     input_img = rng.integers(-128, 128, size=(1, 784), dtype=np.int8)
 
-    # --- CPU reference ---
-    n0, n1 = 256, 10
+    # --- CPU reference for Layer 0 ---
+    n0 = 256
     mult0 = np.ones(n0, dtype=np.int32) * (1 << 30)
     shift0 = np.zeros(n0, dtype=np.int32)
     cpu_acc0 = input_img.astype(np.int32) @ w0.T.astype(np.int32)
     cpu_h = cpu_requantize(cpu_acc0, b0, mult0, shift0, 0, 0, 127)
+    log.info("CPU Layer 0: shape=%s min=%d max=%d", cpu_h.shape, cpu_h.min(), cpu_h.max())
 
-    mult1 = np.ones(n1, dtype=np.int32) * (1 << 30)
-    shift1 = np.zeros(n1, dtype=np.int32)
-    cpu_acc1 = cpu_h.astype(np.int32) @ w1.T.astype(np.int32)
-    cpu_out = cpu_requantize(cpu_acc1, b1, mult1, shift1, 0, -128, 127)
-    log.info("CPU: pred=%d logits=%s", int(cpu_out.argmax()),
-             str(cpu_out.flatten().tolist()))
-
-    # --- Sim inference ---
+    # --- Sim Layer 0 (isolated) ---
     transport = TcpTransport(args.tcp, timeout_s=args.driver_timeout)
     try:
         sim_h = run_gemm_on_sim(
@@ -244,37 +224,66 @@ def main():
             bias=b0.astype(np.int32), multiplier=mult0, shift=shift0,
             output_offset=0, activation_min=0, activation_max=127,
         )
-
-        sim_out = run_gemm_on_sim(
-            transport, sim_h, w1.T.astype(np.int8),
-            bias=b1.astype(np.int32), multiplier=mult1, shift=shift1,
-            output_offset=0, activation_min=-128, activation_max=127,
-        )
     finally:
         transport.close()
 
-    log.info("Sim: pred=%d logits=%s", int(sim_out.argmax()),
-             str(sim_out.flatten().tolist()))
+    log.info("Sim Layer 0:  shape=%s min=%d max=%d", sim_h.shape, sim_h.min(), sim_h.max())
 
-    # Compare
-    tol = args.verify_tolerance
-    delta_h = np.abs(cpu_h.astype(np.int32) - sim_h.astype(np.int32))
-    delta_out = np.abs(cpu_out.astype(np.int32) - sim_out.astype(np.int32))
+    # --- Compare ---
+    delta = np.abs(cpu_h.astype(np.int32) - sim_h.astype(np.int32))
+    m, n = cpu_h.shape
 
-    log.info("Layer 0: max|Δ|=%d, within±%d: %.1f%%",
-             int(delta_h.max()), tol, 100 * (delta_h <= tol).mean())
-    log.info("Layer 1: max|Δ|=%d, within±%d: %.1f%%",
-             int(delta_out.max()), tol, 100 * (delta_out <= tol).mean())
+    within_0 = int((delta == 0).sum())
+    within_1 = int((delta <= 1).sum())
+    exact_pct = 100 * within_0 / (m * n)
+    within1_pct = 100 * within_1 / (m * n)
+    max_delta = int(delta.max())
+    log.info("Layer 0: max|Δ|=%d, exact=%.1f%%, within±1=%.1f%%", max_delta, exact_pct, within1_pct)
 
-    same_pred = int(cpu_out.argmax()) == int(sim_out.argmax())
-    pass_tol = int(delta_h.max()) <= tol and int(delta_out.max()) <= tol
+    # Detailed per-channel diagnostics for the last N-tile (channels 248-255)
+    tile = 8
+    last_n_tile_start = (n // tile - 1) * tile
+    log.info("")
+    log.info("--- Per-channel detail: last N-tile (ch %d..%d) ---", last_n_tile_start, n - 1)
+    for c in range(max(0, last_n_tile_start - tile), n):
+        cpu_val = int(cpu_h[0, c])
+        sim_val = int(sim_h[0, c])
+        d = abs(cpu_val - sim_val)
+        marker = " <-- MISMATCH" if d > 0 else ""
+        log.info("  ch%3d: cpu=%4d  sim=%4d  |Δ|=%d%s", c, cpu_val, sim_val, d, marker)
 
-    if same_pred or pass_tol:
-        log.info("PASS")
-        return 0
-    else:
-        log.error("FAIL: mismatched prediction or tolerance exceeded")
+    # List all mismatches
+    big_mismatches = []
+    for c in range(n):
+        d = abs(int(cpu_h[0, c]) - int(sim_h[0, c]))
+        if d > 1:
+            big_mismatches.append((c, int(cpu_h[0, c]), int(sim_h[0, c]), d))
+
+    if big_mismatches:
+        log.info("")
+        log.info("--- Large mismatches (|Δ| > 1): %d channels ---", len(big_mismatches))
+        for c, cpu_v, sim_v, d in big_mismatches:
+            log.info("  ch%3d: cpu=%4d  sim=%4d  |Δ|=%d", c, cpu_v, sim_v, d)
+
+    log.info("")
+
+    # Check: are our suspected failure channels still present?
+    suspect_channels = [251, 255]
+    for c in suspect_channels:
+        cpu_v = int(cpu_h[0, c])
+        sim_v = int(sim_h[0, c])
+        d = abs(cpu_v - sim_v)
+        if d > 0:
+            log.info("SUSPECT ch%d: cpu=%d sim=%d |Δ|=%d (BUG CONFIRMED)", c, cpu_v, sim_v, d)
+        else:
+            log.info("SUSPECT ch%d: cpu=%d sim=%d MATCH (interesting...)", c, cpu_v, sim_v)
+
+    if max_delta > 1:
+        log.info("FAIL: max|Δ|=%d > tolerance", max_delta)
         return 1
+    else:
+        log.info("PASS: all channels within ±1")
+        return 0
 
 
 if __name__ == "__main__":

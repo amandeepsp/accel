@@ -39,7 +39,7 @@ def _write_all(fd: int, data: bytes) -> None:
         data = data[n:]
 
 
-def _bridge(src_read, dst_write, stop: threading.Event) -> None:
+def _bridge(src_read, dst_write, stop: threading.Event, log_file=None) -> None:
     """Pump bytes from src_read() into dst_write() until EOF or stop event."""
     while not stop.is_set():
         try:
@@ -48,6 +48,9 @@ def _bridge(src_read, dst_write, stop: threading.Event) -> None:
             break
         if not data:
             break
+        if log_file is not None:
+            log_file.write(data)
+            log_file.flush()
         try:
             dst_write(data)
         except (OSError, BrokenPipeError):
@@ -98,6 +101,8 @@ def main() -> int:
                    help="Argument forwarded to soc.sim (repeatable)")
     p.add_argument("--sim-log", default="/tmp/sim.log",
                    help="File for sim build/runtime logs (stderr)")
+    p.add_argument("--uart-log", default="/tmp/sim_uart.log",
+                   help="File for sim UART stdout bytes")
     p.add_argument("--accept-timeout", type=float, default=120.0,
                    help="Seconds to wait for inner cmd to connect")
     p.add_argument("--boot-timeout", type=float, default=600.0,
@@ -118,6 +123,7 @@ def main() -> int:
     listener.listen(1)
 
     sim_log = open(args.sim_log, "wb")
+    uart_log = open(args.uart_log, "wb")
 
     # Spawn sim with stdio piped. Own process group so we can kill the whole
     # tree (soc.sim -> bash run_sim.sh -> Vsim) on exit.
@@ -152,6 +158,7 @@ def main() -> int:
                 sim.wait()
         listener.close()
         sim_log.close()
+        uart_log.close()
         return 1
 
     inner: subprocess.Popen[bytes] | None = None
@@ -179,6 +186,7 @@ def main() -> int:
         with contextlib.suppress(OSError):
             listener.close()
         sim_log.close()
+        uart_log.close()
 
     def on_signal(signum: int, _frame: object) -> None:
         cleanup()
@@ -212,7 +220,7 @@ def main() -> int:
         bridge_threads = [
             threading.Thread(
                 target=_bridge,
-                args=(lambda n: os.read(sim_out_fd, n), conn.sendall, stop),
+                args=(lambda n: os.read(sim_out_fd, n), conn.sendall, stop, uart_log),
                 daemon=True, name="sim->tcp",
             ),
             threading.Thread(

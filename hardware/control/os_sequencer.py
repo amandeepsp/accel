@@ -58,6 +58,7 @@ class OSSequencer(wiring.Component):
         ports["last"] = In(1)
         ports["state_debug"] = Out(8)
         ports["busy_debug"] = Out(1)
+        ports["first_latch_debug"] = Out(1)
 
         # Scratchpad interface
         ports["act_rd_addr"] = Out(scratchpad_addr_width)
@@ -102,22 +103,28 @@ class OSSequencer(wiring.Component):
         # Epilogue drain counter
         epi_counter = Signal(range(num_results))
 
+        # Latch `first` from IDLE→PRIME so PRIME can gate psum_load even when
+        # we re-enter PRIME from DONE without a fresh start pulse.
+        first_latch = Signal()
+
         with m.FSM(name="fsm") as fsm:
             with m.State("IDLE"):
                 m.d.comb += self.done.eq(0)
                 with m.If(self.start):
                     m.d.sync += cycle.eq(0)
-                    with m.If(self.first):
-                        m.next = "PRIME"
-                    with m.Else():
-                        m.next = "FEED"
+                    m.d.sync += first_latch.eq(self.first)
+                    # Always go through PRIME so the bank is swapped to the
+                    # freshly DMA-filled side and the read address is primed
+                    # to 0 (sync-read latency).  psum_load is gated by `first`
+                    # inside PRIME so the accumulator persists across K-tiles.
+                    m.next = "PRIME"
 
             with m.State("PRIME"):
-                m.d.comb += self.arr_psum_load.eq(1)
+                m.d.comb += self.arr_psum_load.eq(first_latch)
                 m.d.comb += self.act_rd_addr.eq(0)
                 m.d.comb += self.wgt_rd_addr.eq(0)
-                m.d.comb += self.act_swap.eq(self.first)
-                m.d.comb += self.wgt_swap.eq(self.first)
+                m.d.comb += self.act_swap.eq(1)
+                m.d.comb += self.wgt_swap.eq(1)
                 m.next = "FEED"
 
             with m.State("FEED"):
@@ -163,18 +170,16 @@ class OSSequencer(wiring.Component):
 
             with m.State("DONE"):
                 m.d.comb += self.done.eq(1)
-                m.d.comb += self.act_swap.eq(1)
-                m.d.comb += self.wgt_swap.eq(1)
 
                 with m.If(~self.start):
                     m.next = "IDLE"
                 with m.Else():
-                    m.next = "WAIT_START_DEASSERT"
-
-            with m.State("WAIT_START_DEASSERT"):
-                m.d.comb += self.done.eq(1)
-                with m.If(~self.start):
-                    m.next = "IDLE"
+                    # Start next tile immediately (start is a one-cycle pulse
+                    # from i_compute_start, so we must capture it here rather
+                    # than bounce through WAIT_START_DEASSERT and miss it).
+                    m.d.sync += cycle.eq(0)
+                    m.d.sync += first_latch.eq(self.first)
+                    m.next = "PRIME"
 
         m.d.comb += [
             self.state_debug.eq(
@@ -188,6 +193,7 @@ class OSSequencer(wiring.Component):
                 | fsm.ongoing("WAIT_START_DEASSERT") * 7
             ),
             self.busy_debug.eq(~fsm.ongoing("IDLE")),
+            self.first_latch_debug.eq(first_latch),
         ]
 
         return m

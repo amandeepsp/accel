@@ -85,8 +85,16 @@ def pack_input_tiles(matrix: np.ndarray, tile: int) -> bytes:
     return np.concatenate(chunks).astype(np.int8).tobytes()
 
 
-def pack_weight_rows(matrix: np.ndarray) -> bytes:
-    return np.ascontiguousarray(matrix).astype(np.int8).tobytes()
+def pack_weight_rows(matrix: np.ndarray, tile: int = 8) -> bytes:
+    k, n = matrix.shape
+    words = []
+    for t in range(0, n, tile):
+        for kk in range(k):
+            vals = matrix[kk, t:t+tile]
+            if vals.shape[0] < tile:
+                vals = np.pad(vals, (0, tile - vals.shape[0]), mode="constant")
+            words.append(np.ascontiguousarray(vals, dtype=np.int8).tobytes())
+    return b"".join(words)
 
 
 INT32_MIN = -(1 << 31)

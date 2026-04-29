@@ -22,9 +22,9 @@ async def run_tile(ctx, dut, k, *, first=True, last=True, rows=2, cols=2):
     await ctx.tick()
     ctx.set(dut.start, 0)
 
-    if first:
-        # PRIME
-        await ctx.tick()
+    # PRIME: always runs (gates psum_load on `first` internally) so the
+    # bank-swap pulse fires for every K-tile.
+    await ctx.tick()
 
     # FEED
     for _ in range(k):
@@ -58,8 +58,9 @@ class TestSequencer:
         async def testbench(ctx):
             await run_tile(ctx, dut, K, first=True, last=True, rows=ROWS, cols=COLS)
             assert ctx.get(dut.done) == 1
-            assert ctx.get(dut.act_swap) == 1
-            assert ctx.get(dut.wgt_swap) == 1
+            # Swap pulse fires in PRIME, not DONE.
+            assert ctx.get(dut.act_swap) == 0
+            assert ctx.get(dut.wgt_swap) == 0
 
         dut = OSSequencer(rows=ROWS, cols=COLS)
         sim = Simulator(dut)
@@ -216,19 +217,23 @@ class TestSequencer:
             sim.run()
 
     def test_swap_single_pulse(self):
-        """Verify swap signals pulse once in DONE, not continuously."""
+        """Verify swap pulses once in PRIME (one cycle) and is otherwise low."""
         ROWS, COLS, K = 2, 2, 1
 
         async def testbench(ctx):
-            await run_tile(ctx, dut, K, first=True, last=True, rows=ROWS, cols=COLS)
+            ctx.set(dut.k_count, K)
+            ctx.set(dut.first, 1)
+            ctx.set(dut.last, 1)
+            ctx.set(dut.start, 1)
+            await ctx.tick()
+            ctx.set(dut.start, 0)
 
-            # DONE: swap asserted
+            # We're now in PRIME — swap should be asserted.
             assert ctx.get(dut.act_swap) == 1
             assert ctx.get(dut.wgt_swap) == 1
-
             await ctx.tick()
 
-            # After DONE → IDLE: swap deasserted
+            # FEED: swap deasserted.
             assert ctx.get(dut.act_swap) == 0
             assert ctx.get(dut.wgt_swap) == 0
 
