@@ -17,8 +17,7 @@ import tempfile
 import numpy as np
 
 from shared.ir import (
-    build_non_pipelined_gemm_program,
-    build_pipelined_gemm_program,
+    build_gemm_program,
     plan_memory,
 )
 from shared.layout import align_up, pack_input_tiles, pack_weight_rows
@@ -263,36 +262,26 @@ def main() -> int:
         log.info("=== %s ===", variant)
 
         if variant == "non-pipelined":
-            program = build_non_pipelined_gemm_program(
-                layout=layout,
-                m=m,
-                k=k,
-                n=n,
-                act_tensor_id=0,
-                wgt_tensor_id=1,
-                out_tensor_id=2,
-                bias_id=3,
-                mult_id=4,
-                shift_id=5,
-                tile=tile,
-                k_tile=cfu_store_depth_words // (cfu_word_bits // 32),
-            )
+            k_tile = cfu_store_depth_words // (cfu_word_bits // 32)
         else:
-            program = build_pipelined_gemm_program(
-                layout=layout,
-                m=m,
-                k=k,
-                n=n,
-                tile=tile,
-                act_tensor_id=0,
-                wgt_tensor_id=1,
-                out_tensor_id=2,
-                bias_id=3,
-                mult_id=4,
-                shift_id=5,
-                cfu_word_bits=cfu_word_bits,
-                cfu_store_depth_words=cfu_store_depth_words,
-            )
+            k_tile = None
+
+        program = build_gemm_program(
+            layout=layout,
+            m=m,
+            k=k,
+            n=n,
+            tile=tile,
+            act_tensor_id=0,
+            wgt_tensor_id=1,
+            out_tensor_id=2,
+            bias_id=3,
+            mult_id=4,
+            shift_id=5,
+            cfu_word_bits=cfu_word_bits,
+            cfu_store_depth_words=cfu_store_depth_words,
+            k_tile=k_tile,
+        )
 
         log.debug("program (%d bytes): %s", len(program), program.hex())
 

@@ -73,10 +73,7 @@ def make_matmul_requant_pattern(
     return FusionPattern(name=name, pattern=output, check=check)
 
 
-# Backwards-compatible aliases
-def make_matmul_requant_no_input_q_pattern(check=None) -> FusionPattern:
-    """Deprecated: use ``make_matmul_requant_pattern(input_is_quantized=False)``."""
-    return make_matmul_requant_pattern(input_is_quantized=False, check=check)
+
 
 
 def partition_for_accel_cfu(
@@ -97,8 +94,8 @@ def partition_for_accel_cfu(
 
     if patterns is None:
         pattern_list = [
-            make_matmul_requant_pattern(),
-            make_matmul_requant_no_input_q_pattern(),
+            make_matmul_requant_pattern(input_is_quantized=True),
+            make_matmul_requant_pattern(input_is_quantized=False),
         ]
     else:
         pattern_list = list(patterns)

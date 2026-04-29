@@ -15,7 +15,7 @@ from tvm.relax.expr_functor import PyExprVisitor, visitor
 import importlib.util
 import sys
 
-from shared.ir import build_pipelined_gemm_program, patch_epilogue, plan_memory
+from shared.ir import build_gemm_program, patch_epilogue, plan_memory
 
 TENSOR_POOL_BASE = 0x40010000
 MEM_ALIGN = 32
@@ -397,7 +397,7 @@ class AccelRuntime:
             shift_addr=shift_addr,
         )
 
-        program = build_pipelined_gemm_program(
+        program = build_gemm_program(
             layout=layout,
             m=m,
             k=k,

@@ -5,7 +5,7 @@ import time
 
 import numpy as np
 
-from shared.ir import build_pipelined_gemm_program, patch_epilogue, plan_memory
+from shared.ir import build_gemm_program, patch_epilogue, plan_memory
 from shared.layout import align_up, pack_input_tiles, pack_weight_rows
 
 log = logging.getLogger("accel.sim_harness")
@@ -64,7 +64,7 @@ def run_gemm_on_sim(
     layout = plan_memory(
         input_addr, weight_addr, output_addr, bias_addr, mult_addr, shift_addr
     )
-    program = build_pipelined_gemm_program(
+    program = build_gemm_program(
         layout,
         m,
         k,

@@ -325,48 +325,4 @@ def build_gemm_program(
     return builder.build()
 
 
-# Backwards-compatible aliases
-def build_non_pipelined_gemm_program(
-    layout: MemoryLayout,
-    m: int,
-    k: int,
-    n: int,
-    act_tensor_id: int,
-    wgt_tensor_id: int,
-    out_tensor_id: int,
-    bias_id: int,
-    mult_id: int,
-    shift_id: int,
-    tile: int = 8,
-    k_tile: int = 8,
-) -> bytes:
-    """Deprecated: use ``build_gemm_program(..., k_tile=8)``."""
-    return build_gemm_program(
-        layout, m, k, n, tile, act_tensor_id, wgt_tensor_id, out_tensor_id,
-        bias_id, mult_id, shift_id, k_tile=k_tile,
-    )
 
-
-def build_pipelined_gemm_program(
-    layout: MemoryLayout,
-    m: int,
-    k: int,
-    n: int,
-    tile: int,
-    act_tensor_id: int,
-    wgt_tensor_id: int,
-    out_tensor_id: int,
-    bias_id: int,
-    mult_id: int,
-    shift_id: int,
-    cfu_word_bits: int = 64,
-    cfu_store_depth_words: int = 512,
-    k_tile: int | None = None,
-) -> bytes:
-    """Deprecated: use ``build_gemm_program(...)``."""
-    return build_gemm_program(
-        layout, m, k, n, tile, act_tensor_id, wgt_tensor_id, out_tensor_id,
-        bias_id, mult_id, shift_id,
-        k_tile=k_tile, cfu_word_bits=cfu_word_bits,
-        cfu_store_depth_words=cfu_store_depth_words,
-    )
