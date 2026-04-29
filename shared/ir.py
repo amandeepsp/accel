@@ -164,7 +164,7 @@ def patch_epilogue(
     """
     data = bytearray(program)
     num_tensors = data[5]
-    header_size = 8 + num_tensors * struct.calcsize(TensorSpec._fmt)
+    header_size = 8 + num_tensors * TensorSpec._struct.size
     cursor = header_size
     patched = 0
     while cursor < len(data):

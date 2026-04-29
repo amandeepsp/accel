@@ -60,7 +60,7 @@ class _FallbackInstruction(Instruction):
     def elaborate(self, platform: Platform):
         m = super().elaborate(platform)
         m.d.comb += self.output.eq(self.in0)
-        m.d.comb += self.done.eq(1)
+        self.signal_done(m)
         return m
 
 

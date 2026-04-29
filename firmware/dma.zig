@@ -1,7 +1,7 @@
 const csr = @import("csr");
 const mmio = @import("mmio.zig");
 
-pub fn Dma(
+fn DmaImpl(
     comptime base_addr: usize,
     comptime length_addr: usize,
     comptime enable_addr: usize,
@@ -10,65 +10,52 @@ pub fn Dma(
     comptime offset_addr: usize,
 ) type {
     return struct {
-        const Self = @This();
+        const base_reg = mmio.Reg(base_addr);
+        const length_reg = mmio.Reg(length_addr);
+        const enable_reg = mmio.Reg(enable_addr);
+        const done_reg = mmio.Reg(done_addr);
+        const loop_reg = mmio.Reg(loop_addr);
+        const offset_reg = mmio.Reg(offset_addr);
 
-        base: mmio.Reg(base_addr),
-        length: mmio.Reg(length_addr),
-        enable: mmio.Reg(enable_addr),
-        done: mmio.Reg(done_addr),
-        loop: mmio.Reg(loop_addr),
-        offset: mmio.Reg(offset_addr),
-
-        pub fn init() Self {
-            return .{
-                .base = .{},
-                .length = .{},
-                .enable = .{},
-                .done = .{},
-                .loop = .{},
-                .offset = .{},
-            };
+        pub inline fn configure(base_ptr: u32, len: u32) void {
+            base_reg.write(base_ptr);
+            length_reg.write(len);
         }
 
-        pub inline fn configure(self: Self, base_ptr: u32, len: u32) void {
-            @TypeOf(self.base).write(base_ptr);
-            @TypeOf(self.length).write(len);
+        pub inline fn setLoop(enabled: bool) void {
+            loop_reg.write(@intFromBool(enabled));
         }
 
-        pub inline fn setLoop(self: Self, enabled: bool) void {
-            @TypeOf(self.loop).write(@intFromBool(enabled));
+        pub inline fn start() void {
+            enable_reg.write(1);
         }
 
-        pub inline fn start(self: Self) void {
-            @TypeOf(self.enable).write(1);
+        pub inline fn kick(base_ptr: u32, len: u32) void {
+            stop();
+            setLoop(false);
+            configure(base_ptr, len);
+            start();
         }
 
-        pub inline fn kick(self: Self, base_ptr: u32, len: u32) void {
-            self.stop();
-            self.setLoop(false);
-            self.configure(base_ptr, len);
-            self.start();
+        pub inline fn stop() void {
+            enable_reg.write(0);
         }
 
-        pub inline fn stop(self: Self) void {
-            @TypeOf(self.enable).write(0);
+        pub inline fn isDone() bool {
+            return done_reg.read() != 0;
         }
 
-        pub inline fn isDone(self: Self) bool {
-            return @TypeOf(self.done).read() != 0;
+        pub inline fn wait() void {
+            while (!isDone()) {}
         }
 
-        pub inline fn wait(self: Self) void {
-            while (!self.isDone()) {}
-        }
-
-        pub inline fn offsetBytes(self: Self) u32 {
-            return @TypeOf(self.offset).read();
+        pub inline fn offsetBytes() u32 {
+            return offset_reg.read();
         }
     };
 }
 
-pub const Act = Dma(
+pub const Act = DmaImpl(
     csr.act_dma_base,
     csr.act_dma_length,
     csr.act_dma_enable,
@@ -77,7 +64,7 @@ pub const Act = Dma(
     csr.act_dma_offset,
 );
 
-pub const Wgt = Dma(
+pub const Wgt = DmaImpl(
     csr.wgt_dma_base,
     csr.wgt_dma_length,
     csr.wgt_dma_enable,

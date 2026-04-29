@@ -149,10 +149,8 @@ pub fn execute(payload_len: u16, debug_buf: ?[]u8) ExecError!u32 {
                 _ = try ctx.readInstruction(ir.Done, opcode);
                 if (state.compute_pending) {
                     cfu.computeWait();
-                    const act_dma = dma.Act.init();
-                    const wgt_dma = dma.Wgt.init();
-                    act_dma.stop();
-                    wgt_dma.stop();
+                    dma.Act.stop();
+                    dma.Wgt.stop();
                     state.compute_pending = false;
                 }
                 saw_done = true;
@@ -186,8 +184,7 @@ fn tileLoadAct(descs: []const ir.TensorDescriptor, inst: ir.TileLoadAct) ExecErr
     const len_bytes = try mulU32(inst.k_words, 8);
     if (!memory.rangeValid(addr, len_bytes)) return error.BadAddress;
 
-    const act_dma = dma.Act.init();
-    act_dma.kick(addr, len_bytes);
+    dma.Act.kick(addr, len_bytes);
 }
 
 fn tileLoadWgt(descs: []const ir.TensorDescriptor, inst: ir.TileLoadWgt) ExecError!void {
@@ -206,8 +203,7 @@ fn tileLoadWgt(descs: []const ir.TensorDescriptor, inst: ir.TileLoadWgt) ExecErr
     const len_bytes = try mulU32(inst.k_words, tile_size);
     if (!memory.rangeValid(addr, len_bytes)) return error.BadAddress;
 
-    const wgt_dma = dma.Wgt.init();
-    wgt_dma.kick(addr, len_bytes);
+    dma.Wgt.kick(addr, len_bytes);
 }
 
 fn tileMma(state: *PipeState, inst: ir.TileMma) void {
@@ -216,10 +212,8 @@ fn tileMma(state: *PipeState, inst: ir.TileMma) void {
         state.compute_pending = false;
     }
 
-    const act_dma = dma.Act.init();
-    const wgt_dma = dma.Wgt.init();
-    act_dma.wait();
-    wgt_dma.wait();
+    dma.Act.wait();
+    dma.Wgt.wait();
 
     cfu.computeStart(inst.flags.first, inst.flags.last, inst.k_count);
     state.compute_pending = true;
@@ -235,10 +229,8 @@ fn tileStore(state: *PipeState, descs: []const ir.TensorDescriptor, inst: ir.Til
 
     if (state.compute_pending) {
         cfu.computeWait();
-        const act_dma = dma.Act.init();
-        const wgt_dma = dma.Wgt.init();
-        act_dma.stop();
-        wgt_dma.stop();
+        dma.Act.stop();
+        dma.Wgt.stop();
         state.compute_pending = false;
     }
 

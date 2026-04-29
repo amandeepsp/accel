@@ -45,20 +45,20 @@ pub inline fn writeEpiParam(comptime field: EpiParamField, channel: i32, value: 
     _ = op(2, @intFromEnum(field), channel, value);
 }
 
+pub inline fn writeConfig(comptime reg: ConfigRegister, value: i32) void {
+    _ = op(3, @intFromEnum(reg), 0, value);
+}
+
 pub inline fn setOutputOffset(value: i32) void {
-    _ = op(3, @intFromEnum(ConfigRegister.output_offset), 0, value);
+    writeConfig(.output_offset, value);
 }
 
 pub inline fn setActivationMin(value: i32) void {
-    _ = op(3, @intFromEnum(ConfigRegister.activation_min), 0, value);
+    writeConfig(.activation_min, value);
 }
 
 pub inline fn setActivationMax(value: i32) void {
-    _ = op(3, @intFromEnum(ConfigRegister.activation_max), 0, value);
-}
-
-pub inline fn writeConfig(comptime reg: ConfigRegister, value: i32) void {
-    _ = op(3, @intFromEnum(reg), 0, value);
+    writeConfig(.activation_max, value);
 }
 
 pub inline fn readResult(index: i32) i32 {

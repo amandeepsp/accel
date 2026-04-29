@@ -57,6 +57,24 @@ inline fn require(comptime T: type, opt: ?T) union(enum) { ok: T, err: c_int } {
     return .{ .err = @intFromEnum(AccelStatus.invalid_argument) };
 }
 
+inline fn mapError(err: anyerror) c_int {
+    return @intFromEnum(AccelStatus.fromError(err));
+}
+
+inline fn unwrapHandle(handle: ?*AccelHandle) *AccelHandle {
+    return switch (require(*AccelHandle, handle)) {
+        .ok => |v| v,
+        .err => |e| return e,
+    };
+}
+
+inline fn unwrapPtr(comptime T: type, opt: ?T) T {
+    return switch (require(T, opt)) {
+        .ok => |v| v,
+        .err => |e| return e,
+    };
+}
+
 pub const AccelHandle = struct {
     driver: driver.Driver,
 };
@@ -66,14 +84,8 @@ pub export fn accel_open(
     baud_rate: u32,
     out_handle: ?*?*AccelHandle,
 ) c_int {
-    const path = switch (require([*:0]const u8, port_path)) {
-        .ok => |v| v,
-        .err => |e| return e,
-    };
-    const handle_ptr = switch (require(*?*AccelHandle, out_handle)) {
-        .ok => |v| v,
-        .err => |e| return e,
-    };
+    const path = unwrapPtr([*:0]const u8, port_path);
+    const handle_ptr = unwrapPtr(*?*AccelHandle, out_handle);
 
     const handle = std.heap.page_allocator.create(AccelHandle) catch {
         handle_ptr.* = null;
@@ -83,7 +95,7 @@ pub export fn accel_open(
 
     handle.driver = driver.Driver.init(std.mem.span(path), baud_rate) catch |err| {
         handle_ptr.* = null;
-        return @intFromEnum(AccelStatus.fromError(err));
+        return mapError(err);
     };
 
     handle_ptr.* = handle;
@@ -98,11 +110,8 @@ pub export fn accel_close(handle: ?*AccelHandle) void {
 }
 
 pub export fn accel_ping(handle: ?*AccelHandle) c_int {
-    const h = switch (require(*AccelHandle, handle)) {
-        .ok => |v| v,
-        .err => |e| return e,
-    };
-    h.driver.ping() catch |err| return @intFromEnum(AccelStatus.fromError(err));
+    const h = unwrapHandle(handle);
+    h.driver.ping() catch |err| return mapError(err);
     return @intFromEnum(AccelStatus.ok);
 }
 
@@ -117,18 +126,9 @@ pub export fn accel_write_mem(
     data: ?[*]const u8,
     len: usize,
 ) c_int {
-    const h = switch (require(*AccelHandle, handle)) {
-        .ok => |v| v,
-        .err => |e| return e,
-    };
-    const ptr = switch (require([*]const u8, data)) {
-        .ok => |v| v,
-        .err => |e| return e,
-    };
-
-    h.driver.writeMem(addr, ptr[0..len]) catch |err| {
-        return @intFromEnum(AccelStatus.fromError(err));
-    };
+    const h = unwrapHandle(handle);
+    const ptr = unwrapPtr([*]const u8, data);
+    h.driver.writeMem(addr, ptr[0..len]) catch |err| return mapError(err);
     return @intFromEnum(AccelStatus.ok);
 }
 
@@ -138,18 +138,9 @@ pub export fn accel_read_mem(
     buf: ?[*]u8,
     len: usize,
 ) c_int {
-    const h = switch (require(*AccelHandle, handle)) {
-        .ok => |v| v,
-        .err => |e| return e,
-    };
-    const ptr = switch (require([*]u8, buf)) {
-        .ok => |v| v,
-        .err => |e| return e,
-    };
-
-    h.driver.readMem(addr, ptr[0..len]) catch |err| {
-        return @intFromEnum(AccelStatus.fromError(err));
-    };
+    const h = unwrapHandle(handle);
+    const ptr = unwrapPtr([*]u8, buf);
+    h.driver.readMem(addr, ptr[0..len]) catch |err| return mapError(err);
     return @intFromEnum(AccelStatus.ok);
 }
 
@@ -159,22 +150,11 @@ pub export fn accel_exec(
     program_len: usize,
     out_cycles: ?*u32,
 ) c_int {
-    const h = switch (require(*AccelHandle, handle)) {
-        .ok => |v| v,
-        .err => |e| return e,
-    };
-    const ptr = switch (require([*]const u8, program)) {
-        .ok => |v| v,
-        .err => |e| return e,
-    };
-    const cycles_ptr = switch (require(*u32, out_cycles)) {
-        .ok => |v| v,
-        .err => |e| return e,
-    };
+    const h = unwrapHandle(handle);
+    const ptr = unwrapPtr([*]const u8, program);
+    const cycles_ptr = unwrapPtr(*u32, out_cycles);
 
-    cycles_ptr.* = h.driver.exec(ptr[0..program_len]) catch |err| {
-        return @intFromEnum(AccelStatus.fromError(err));
-    };
+    cycles_ptr.* = h.driver.exec(ptr[0..program_len]) catch |err| return mapError(err);
     return @intFromEnum(AccelStatus.ok);
 }
 
