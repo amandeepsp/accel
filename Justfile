@@ -50,6 +50,11 @@ hw-reset:
 libloom:
     zig build libaccel -Dbuild-dir=build/sipeed_tang_nano_20k
 
+# Train + export a quantized MNIST ONNX for TVM/hardware smoke tests (no-op if present).
+mnist-model:
+    @test -f models/out/mnist_int8.onnx || \
+        uv run python -m models.mnist --epochs 10 --out-dir models/out
+
 # Build firmware targeting the hardware SoC
 hw-firmware build-dir="build/sipeed_tang_nano_20k":
     zig build firmware \
@@ -77,6 +82,11 @@ hw-gemm m="8" k="8" n="8" variant="all" verify-tolerance="1": libloom hw-firmwar
         --cfu-word-bits $(({{ cfu_rows }} * {{ cfu_in_width }})) \
         --cfu-store-depth-words {{ cfu_store_depth }} \
         --verify-tolerance {{ verify-tolerance }}
+
+# Run MNIST TVM pipeline against real hardware (auto-builds the ONNX if needed).
+hw-mnist port=port: mnist-model libloom hw-firmware
+    uv run python -m tests.test_hw_pipeline --port {{ port }} \
+        --lib zig-out/lib/libaccel.so
 
 # JTAG reset → firmware upload → small GEMM → large GEMM (one after another).
 hw-gemm-reset:
